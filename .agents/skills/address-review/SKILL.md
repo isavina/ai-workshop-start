@@ -12,7 +12,7 @@ Started by the `review-suggested` label, in an automation: check first that the 
 pull request. Gone → another run answered this review already; stop.
 
 ```console
-$ gh pr view <number> --json labels --jq '[.labels[].name] | index("review-suggested")'   # null → stop
+$ gh pr view <number> --json labels --jq 'any(.labels[]; .name == "review-suggested")'   # false → stop
 ```
 
 ## 1. Read the review
@@ -27,9 +27,11 @@ $ gh api --paginate repos/<owner>/<repo>/pulls/<number>/comments --jq '.[] | {id
 
 Which threads wait for an answer is told by the hidden markers [code-review](../code-review/SKILL.md#in-the-review-loop)
 puts on each comment, not by its author: the review and the answers may post from the same account.
-A thread waits when its last comment is not an answer, that is, has no `skill-atlas:reply` marker:
-a finding, a follow-up, or a person's comment. Answers from before the markers are signed
-`Name: Address Review Skill Runner / Run:` instead; they count as answers too.
+A thread waits when its last comment is not an answer, that is, does not end in a `skill-atlas:reply`
+marker: a finding, a follow-up, or a person's comment. Match the whole marker on the last line, not the
+name anywhere: a finding about the markers quotes their names. Answers from before the markers end
+in the signature `Name: Address Review Skill Runner / Run: <link>` instead; they count as answers too,
+matched on the last line in the same way.
 
 ```console
 $ gh api graphql --paginate -F owner=<owner> -F repo=<repo> -F number=<number> -f query='
@@ -37,14 +39,17 @@ $ gh api graphql --paginate -F owner=<owner> -F repo=<repo> -F number=<number> -
       repository(owner: $owner, name: $repo) { pullRequest(number: $number) {
         reviewThreads(first: 100, after: $endCursor) {
           nodes { path line isResolved
+            first: comments(first: 1) { nodes { databaseId } }
             last: comments(last: 1) { nodes { databaseId body } } }
           pageInfo { hasNextPage endCursor } } } } }' \
   --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved | not) | .last.nodes[0] as $l
-    | select($l.body | (contains("skill-atlas:reply") or contains("Name: Address Review Skill Runner / Run:")) | not)
-    | {id: $l.databaseId, path, line, last: $l.body}'
+    | select($l.body | (test("<!-- skill-atlas:reply to=[0-9]+ -->\\s*$") or test("Name: Address Review Skill Runner / Run: \\S+\\s*$")) | not)
+    | {id: .first.nodes[0].databaseId, last_id: $l.databaseId, path, line, last: $l.body}'
 ```
 
-`id` is the comment to answer. Each node is a whole thread, so a `--jq` that runs once per page still
+`id` is the thread's first comment: the one to reply to, since GitHub takes replies only to a
+top-level comment. `last_id` is the comment the answer responds to, a follow-up or the finding itself;
+it goes into the marker. Each node is a whole thread, so a `--jq` that runs once per page still
 sees every thread whole. A resolved thread needs nothing.
 
 Then check out the pull request's branch and compare it with the remote:
@@ -95,20 +100,20 @@ $ git push origin <headRefName>
 ## 5. Reply in each thread
 
 ```console
-$ gh api repos/<owner>/<repo>/pulls/<number>/comments/<id>/replies -f body='<reply>'
+$ gh api repos/<owner>/<repo>/pulls/<number>/comments/<id>/replies -f body='<reply>'   # id: the thread's first comment
 $ gh pr comment <number> --body '<reply>'                      # a comment outside the code
 ```
 
 A reply says the commit, what changed, and how it was checked: `Fixed in <sha>: <change>. <The test
 that fails without it / the command and what it prints>.` For a comment that was wrong: what was
-checked and why nothing changed. Its last line is the marker of the comment it answers:
+checked and why nothing changed. Its last line is the marker of the comment it answers, `last_id`:
 
 ```
-<!-- skill-atlas:reply to=<id> -->
+<!-- skill-atlas:reply to=<last_id> -->
 ```
 
-Right before each reply, read the thread again: a `skill-atlas:reply to=<id>` already there → it is
-answered; do not post another.
+Right before each reply, read the thread again: a `skill-atlas:reply to=<last_id>` already there → it
+is answered; do not post another.
 
 ## 6. Remove the label
 

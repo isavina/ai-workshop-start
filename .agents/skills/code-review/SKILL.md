@@ -91,7 +91,18 @@ $ gh api --paginate repos/<owner>/<repo>/pulls/<number>/reviews --jq '.[].body' 
 ```
 
 The head commit already reviewed → stop: no comment, no label. An earlier commit reviewed → review only
-what changed since it, `git diff <that sha>..<head>`; none → the whole pull request.
+what the author changed since it; none → the whole pull request. Not `git diff <that sha>..<head>`:
+after the base is merged in ([address-review](../address-review/SKILL.md) step 4), that shows the base's
+changes too. A shallow checkout first needs the history:
+
+```console
+$ git fetch --unshallow origin <headRefName> <baseRefName>     # or without --unshallow, if not shallow
+$ git log -p --remerge-diff <that sha>..<head> ^origin/<baseRefName>
+```
+
+This lists the author's commits, and for a merge of the base only how its conflicts were resolved.
+Inline comments go only on lines in the pull request's diff (`gh pr diff <number>`); elsewhere
+`POST …/reviews` fails with 422, and the whole review with it.
 
 **No comment twice.** Before posting, read every review comment, resolved threads included:
 
@@ -102,8 +113,29 @@ $ gh api --paginate repos/<owner>/<repo>/pulls/<number>/comments --jq '.[] | {id
 - A finding whose key, or whose problem at the same place, is already there → do not post it again.
 - Answered as fixed, but still wrong → one follow-up in that thread, with the finding's marker; not a
   new comment. Already followed up since the answer → nothing.
-- Post the new findings and the summary in one review (`gh api …/pulls/<number>/reviews`), so a run
-  that stops halfway leaves nothing.
+- Post the new findings, the follow-ups and the summary in one review, so a run that stops halfway
+  leaves nothing. REST `POST …/pulls/<number>/reviews` can only open new threads, and `…/replies`
+  posts at once, outside any review; so use GraphQL: open a pending review, add each follow-up to it,
+  then submit it.
+
+```console
+$ gh pr view <number> --json id --jq .id                     # the pull request's node id
+$ gh api graphql -F owner=<owner> -F repo=<repo> -F number=<number> -f query='
+    query($owner: String!, $repo: String!, $number: Int!) { repository(owner: $owner, name: $repo) {
+      pullRequest(number: $number) { reviewThreads(first: 100) { nodes { id path line } } } } }'   # thread node ids
+$ gh api graphql --input review.json                           # 1. pending review with the new findings
+$ gh api graphql -f review=<review id> -f thread=<thread node id> -f body='<follow-up>' -f query='
+    mutation($review: ID!, $thread: ID!, $body: String!) { addPullRequestReviewThreadReply(input: {
+      pullRequestReviewId: $review, pullRequestReviewThreadId: $thread, body: $body}) { comment { id } } }'
+$ gh api graphql -f review=<review id> -f body='<summary>' -f query='
+    mutation($review: ID!, $body: String!) { submitPullRequestReview(input: {
+      pullRequestReviewId: $review, event: COMMENT, body: $body}) { pullRequestReview { url } } }'
+```
+
+  `review.json` is `{"query": "mutation($pr: ID!, $sha: GitObjectID!, $threads: [DraftPullRequestReviewThread])
+  { addPullRequestReview(input: {pullRequestId: $pr, commitOID: $sha, threads: $threads}) { pullRequestReview { id } } }",
+  "variables": {"pr": "<pull request node id>", "sha": "<head>", "threads": [{"path": "…", "line": 1, "side": "RIGHT", "body": "…"}]}}`;
+  no `event`, so the review stays pending, seen only by its author, until it is submitted.
 
 **Label.** The last step. This review posted a new finding or follow-up → label the pull request
 `review-suggested`; that starts address-review, which removes the label. Nothing new → no label,
