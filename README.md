@@ -37,6 +37,7 @@ Or in the browser: `./skill-atlas serve` opens a local web view at http://localh
 for a repository, its skills and each one's SKILL.md ([spec/web.md](spec/web.md)). Paste
 `https://github.com/JetBrains` there for a whole organization, grouped by repository; start it with
 `GITHUB_TOKEN=$(gh auth token) ./skill-atlas serve` for that.
+[A short demo](docs/demo/organization-scan.mp4) of an organization scan.
 
 ## What counts as a skill
 
