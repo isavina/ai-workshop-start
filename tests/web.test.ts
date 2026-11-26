@@ -141,6 +141,7 @@ async function pageScript(search: string) {
   return {
     status: elements.status,
     list: elements.skills,
+    main,
     button,
     fetches,
     tick: () => [...timers.values()].forEach((callback) => callback()),
@@ -194,6 +195,33 @@ test('the page: a new scan replaces one still running; the earlier one shows nei
   assert.equal(page.button.disabled, false);
   page.tick();
   assert.equal(page.status.textContent, 'isavina/ai-workshop-start · 1 skill');
+});
+
+test('the page: going back to the bare page drops a scan still running; it shows neither its progress nor its result', async () => {
+  const organization = {
+    owner: { name: 'JetBrains', url: 'https://github.com/JetBrains' },
+    scanned: 1,
+    repositories: [{
+      repository: { id: 'JetBrains/MPS', url: 'https://github.com/JetBrains/MPS' },
+      skills: [{ id: 'JetBrains/MPS:x', name: 'bugfix', description: '', path: 'x', link: 'https://github.com/JetBrains/MPS/blob/x', copies: [], text: '' }],
+    }],
+    warnings: [],
+  };
+  const page = await pageScript('');
+  page.submit('https://github.com/JetBrains');
+  page.tick();
+  assert.match(page.status.textContent, /^Scanning every repository of https:\/\/github\.com\/JetBrains… \d+ s$/);
+  page.back('');
+  assert.equal(page.fetches.length, 1, 'nothing to scan on the bare page');
+  assert.equal(page.status.textContent, '');
+  assert.equal(page.button.disabled, false);
+  page.tick();
+  assert.equal(page.status.textContent, '');
+  await page.fetches[0].answer(organization);
+  assert.equal(page.status.textContent, '');
+  assert.doesNotMatch(page.list.textContent, /bugfix/);
+  assert.equal(page.main.hidden, true);
+  assert.equal(page.button.disabled, false);
 });
 
 test('a GitHub repository: its skills, each with its full description, pinned link and SKILL.md', async () => {

@@ -268,8 +268,14 @@ form.addEventListener('submit', (event) => {
 function fromAddress() {
   const query = new URLSearchParams(location.search);
   const repository = query.get('repository');
-  if (repository) load(repository, query.get('skill'));
-  else field.focus();
+  if (repository) return load(repository, query.get('skill'));
+  // The bare page: nothing scanned. A scan still running is dropped, as a newer one would.
+  loading++;
+  say('');
+  warnings.replaceChildren();
+  main.hidden = true;
+  form.querySelector('button').disabled = false;
+  field.focus();
 }
 window.addEventListener('popstate', fromAddress);
 fromAddress();

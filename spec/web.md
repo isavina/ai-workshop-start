@@ -12,6 +12,7 @@
 - Each scan is done when asked; *nothing is stored*
 - While it scans, the page says so, with the seconds so far
 - A new scan, asked or by going back, replaces one still running: only the latest shows its progress and result
+  - Going back to the bare page, with no `?repository`, drops it: an empty page, nothing scanning
 ## Organization
 `github.com/<owner>`, an organization or a user: the [same scan as the CLI](analysis.md#organization)
 - Every public repository at its default branch; no forks, archived or empty repositories
