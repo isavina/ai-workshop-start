@@ -9,6 +9,14 @@ Every `SKILL.md`: **name**, **description**, **link**
 ## Architecture
 Core: fetch → find → parse. CLI and web view: *thin clients*.
 Skill: id = `repo:path`, name, description, commit, the SKILL.md text
+## Filter
+Only the skills with some words in their **name or description**, not the rest of the SKILL.md
+- Case-insensitive, by words: `-`, `_`, `/`, spaces and any other non-letter, non-digit separate them;
+  `code review`, `code-review` and `Code_Review` are the same filter
+- Several words → a skill matches when *all* of them are in its name or description
+- A word matches the *start* of a word: `rev` finds `review`, not `prereview`
+- A filter without words (empty, or only separators) is no filter
+- One filter in `src/core/`: the CLI, the API and the page give the same skills
 ## Details
 - **GitHub API**, no clone; *under 5 s* for intellij-community
 - The name: front matter, else the directory

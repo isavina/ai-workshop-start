@@ -10,6 +10,13 @@
 - Warnings and errors: the same messages as the CLI, on the page
 - The address keeps `?repository=…&skill=<path>`: a scan can be linked and reloaded
 - Each scan is done when asked; *nothing is stored*
+## Filter
+- A **filter field** above the skills, once a scan has skills: the [same filter](analysis.md#filter) as `--filter`
+- *Instant*, on the scan already done: it never scans again
+- The total: `N of M skills`; no match → an empty list and `No skill matches "<words>"`
+- On an organization: `JetBrains · N of M skills in K repositories`, K with a match; repositories without one are not shown, each `n of m skills`
+- The selected skill stays open when it still matches; otherwise the first that does
+- The address keeps `&q=<words>`: a filtered view can be linked and reloaded; a new scan keeps the filter
 - While it scans, the page says so, with the seconds so far
 - A new scan, asked or by going back, replaces one still running: only the latest shows its progress and result
   - Going back to the bare page, with no `?repository`, drops it: an empty page, nothing scanning
@@ -30,3 +37,6 @@ a message the CLI would exit 1 for → status 400, `{ error }`
 
 `GET /api/scan?repository=github.com/<owner>` → `{ owner: { name, url }, scanned, repositories, warnings }`;
 each of `repositories`, with skills only: `{ repository, skills }`, as above
+
+`&q=<words>`: only the skills that match, and `total`, the skills before the filter; on an organization, only
+the repositories with a match

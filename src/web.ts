@@ -2,6 +2,7 @@
 // server on this machine only; each scan is done when asked, and nothing is stored.
 import { createServer, type Server } from 'node:http';
 import { AtlasError } from './core/errors.ts';
+import { filterSkills, filterWords, matchesFilter } from './core/filter.ts';
 import { skillLink, type Repository, type Skill } from './core/model.ts';
 import { isOwner, scan, scanOwner, type Owner, type Source } from './core/scan.ts';
 
@@ -13,7 +14,7 @@ export type WebOptions = {
 /**
  * `GET /`: the page. `GET /api/scan?repository=<GitHub URL | directory | github.com/<owner>>`: the
  * scan as JSON, an owner's grouped by repository, or `{ error }` with status 400 for what the CLI
- * would explain and exit 1 for.
+ * would explain and exit 1 for. With `&q=<words>`, only the skills that match, and the `total`.
  */
 export function createWebServer({ open }: WebOptions): Server {
   return createServer(async (request, response) => {
@@ -30,6 +31,8 @@ export function createWebServer({ open }: WebOptions): Server {
 
     const input = url.searchParams.get('repository')?.trim();
     if (!input) return json(400, { error: 'Type a GitHub URL or a directory' });
+    const q = url.searchParams.get('q') ?? '';
+    const filtered = filterWords(q).length > 0;
     try {
       const opened = await open(input);
       if (isOwner(opened)) {
@@ -37,10 +40,14 @@ export function createWebServer({ open }: WebOptions): Server {
           throw new AtlasError(`${opened.url} is an organization or a user: scanning all of its repositories takes a request or two each; set GITHUB_TOKEN and restart skill-atlas serve`);
         }
         const result = await scanOwner(opened);
+        const repositories = result.results
+          .map((repository) => ({ ...repository, skills: filterSkills(repository.skills, q) }))
+          .filter((repository) => repository.skills.length > 0);
         return json(200, {
           owner: { name: result.owner, url: opened.url },
           scanned: result.scanned,
-          repositories: result.results.map((repository) => ({
+          ...(filtered && { total: result.results.reduce((sum, repository) => sum + repository.skills.length, 0) }),
+          repositories: repositories.map((repository) => ({
             repository: repositoryJson(repository.repository),
             skills: repository.skills.map((skill) => skillJson(repository.repository, skill)),
           })),
@@ -50,7 +57,8 @@ export function createWebServer({ open }: WebOptions): Server {
       const result = await scan(opened);
       json(200, {
         repository: repositoryJson(result.repository),
-        skills: result.skills.map((skill) => skillJson(result.repository, skill)),
+        ...(filtered && { total: result.skills.length }),
+        skills: filterSkills(result.skills, q).map((skill) => skillJson(result.repository, skill)),
         warnings: result.warnings,
       });
     } catch (error) {
@@ -105,6 +113,9 @@ const PAGE = `<!doctype html>
   #status { margin: 12px 24px 0; }
   #status.error { color: var(--error); }
   #warnings { margin: 8px 24px 0; padding-left: 20px; color: var(--warn); }
+  #filter { display: block; width: calc(100% - 48px); max-width: 480px; margin: 12px 24px 0; }
+  #filter[hidden], #nomatch[hidden] { display: none; }
+  #nomatch { margin: 12px 24px 0; color: var(--muted); }
   main { display: grid; grid-template-columns: minmax(240px, 360px) 1fr; gap: 0; margin-top: 12px; border-top: 1px solid var(--border); }
   main[hidden] { display: none; }
   #skills { list-style: none; margin: 0; padding: 0; border-right: 1px solid var(--border); overflow: auto; max-height: calc(100vh - 170px); }
@@ -137,6 +148,8 @@ const PAGE = `<!doctype html>
 </header>
 <p id="status" role="status"></p>
 <ul id="warnings"></ul>
+<input id="filter" type="search" aria-label="Filter the skills" placeholder="Filter by words in the name or description, such as review" hidden>
+<p id="nomatch" hidden></p>
 <main hidden>
   <ul id="skills"></ul>
   <article id="skill"></article>
@@ -149,7 +162,13 @@ const warnings = document.getElementById('warnings');
 const main = document.querySelector('main');
 const list = document.getElementById('skills');
 const article = document.getElementById('skill');
+const filter = document.getElementById('filter');
+const nomatch = document.getElementById('nomatch');
 let current;
+
+// The filter of src/core/filter.ts, as the CLI and the API use it.
+${filterWords.toString()}
+${matchesFilter.toString()}
 
 function element(tag, properties = {}, ...children) {
   const node = Object.assign(document.createElement(tag), properties);
@@ -185,6 +204,8 @@ async function load(repository, selected) {
   scanning();
   warnings.replaceChildren();
   main.hidden = true;
+  filter.hidden = true;
+  nomatch.hidden = true;
   try {
     const response = await fetch('/api/scan?repository=' + encodeURIComponent(repository));
     const result = await response.json();
@@ -201,21 +222,42 @@ async function load(repository, selected) {
 
 /**
  * One repository's skills, selected by path; or an owner's, grouped by repository, only those with
- * skills, and selected by id, <owner>/<repo>:<path>.
+ * skills, and selected by id, <owner>/<repo>:<path>. Then filtered, on this scan.
  */
 function show(repository, result, selected) {
   const groups = result.owner ? result.repositories : [{ repository: result.repository, skills: result.skills }];
   const key = result.owner ? (skill) => skill.id : (skill) => skill.path;
   const skills = groups.flatMap((group) => group.skills.map((skill) => ({ ...skill, repository: group.repository })));
-  current = { repository, skills, key, owner: Boolean(result.owner) };
+  current = { repository, result, groups, skills, visible: [], key, owner: Boolean(result.owner) };
+  warnings.replaceChildren(...result.warnings.map((text) => element('li', { textContent: 'warning: ' + text })));
+  filter.hidden = skills.length === 0;
+  showFiltered(selected);
+}
+
+/**
+ * The skills that match the filter, never scanning again: the total says N of M, an owner's
+ * repositories without a match are left out. The selected skill stays when it still matches.
+ */
+function showFiltered(selected) {
+  const { result, groups, key } = current;
+  const words = filter.value.trim();
+  const filtered = filterWords(words).length > 0;
+  const shown = groups
+    .map((group) => ({ ...group, all: group.skills.length, skills: group.skills.filter((skill) => matchesFilter(skill, words)) }))
+    .filter((group) => group.skills.length > 0 || !result.owner);
+  const visible = shown.flatMap((group) => group.skills.map((skill) => ({ ...skill, repository: group.repository })));
+  current.visible = visible;
+  const total = count(current.skills.length, 'skill', 'skills');
   status.replaceChildren(
     result.owner
       ? element('a', { href: result.owner.url, textContent: result.owner.name })
       : element('a', { href: result.repository.url, textContent: result.repository.id }),
-    ' · ' + count(skills.length, 'skill', 'skills') + (result.owner ? ' in ' + count(groups.length, 'repository', 'repositories') : ''),
+    ' · ' + (filtered ? visible.length + ' of ' + total : total) +
+      (result.owner ? ' in ' + count(shown.length, 'repository', 'repositories') : ''),
   );
   status.className = '';
-  warnings.replaceChildren(...result.warnings.map((text) => element('li', { textContent: 'warning: ' + text })));
+  nomatch.hidden = !(filtered && visible.length === 0 && current.skills.length > 0);
+  nomatch.textContent = nomatch.hidden ? '' : 'No skill matches "' + words + '"';
   const button = (skill) => element('li', {},
     element('button', { type: 'button', onclick: () => select(key(skill)) },
       element('span', { className: 'name', textContent: skill.name }),
@@ -223,20 +265,22 @@ function show(repository, result, selected) {
       element('span', { className: 'path', textContent: skill.path }),
     ),
   );
-  list.replaceChildren(...groups.flatMap((group) => [
+  list.replaceChildren(...shown.flatMap((group) => [
     ...(result.owner ? [element('li', { className: 'repository' },
       element('a', { href: group.repository.url, textContent: group.repository.id }),
-      element('span', { className: 'count', textContent: ' · ' + count(group.skills.length, 'skill', 'skills') }),
+      element('span', { className: 'count', textContent: ' · ' + (filtered ? group.skills.length + ' of ' : '') + count(group.all, 'skill', 'skills') }),
     )] : []),
     ...group.skills.map(button),
   ]));
-  main.hidden = skills.length === 0;
-  select(skills.some((skill) => key(skill) === selected) ? selected : skills[0] && key(skills[0]), false);
+  main.hidden = visible.length === 0;
+  current.selected = visible.some((skill) => key(skill) === selected) ? selected : visible[0] && key(visible[0]);
+  select(current.selected, false);
 }
 
 function select(selected, remember = true) {
+  current.selected = selected;
   if (!selected) return article.replaceChildren();
-  const { skills, key } = current;
+  const { visible: skills, key } = current;
   const index = skills.findIndex((skill) => key(skill) === selected);
   const skill = skills[index];
   list.querySelectorAll('button').forEach((button, i) => button.setAttribute('aria-current', String(i === index)));
@@ -252,11 +296,20 @@ function select(selected, remember = true) {
   if (remember) setAddress(current.repository, selected, 'replaceState');
 }
 
+/** ?repository=…&q=<words>&skill=…: a scan, filtered, and its selected skill. */
 function setAddress(repository, skill, how) {
   const query = new URLSearchParams({ repository });
+  const words = filter.value.trim();
+  if (words) query.set('q', words);
   if (skill) query.set('skill', skill);
   history[how](null, '', '?' + query);
 }
+
+filter.addEventListener('input', () => {
+  if (!current) return;
+  showFiltered(current.selected);
+  setAddress(current.repository, current.selected, 'replaceState');
+});
 
 form.addEventListener('submit', (event) => {
   event.preventDefault();
@@ -268,12 +321,16 @@ form.addEventListener('submit', (event) => {
 function fromAddress() {
   const query = new URLSearchParams(location.search);
   const repository = query.get('repository');
+  filter.value = query.get('q') ?? '';
   if (repository) return load(repository, query.get('skill'));
   // The bare page: nothing scanned. A scan still running is dropped, as a newer one would.
   loading++;
+  current = undefined;
   say('');
   warnings.replaceChildren();
   main.hidden = true;
+  filter.hidden = true;
+  nomatch.hidden = true;
   form.querySelector('button').disabled = false;
   field.focus();
 }

@@ -55,6 +55,10 @@ test('the page: a field for a repository, the skills and the selected SKILL.md',
   const script = /<script>([\s\S]*?)<\/script>/.exec(page.text)?.[1] ?? '';
   assert.doesNotThrow(() => new Function(script));
   assert.match(script, /const OWNER = \/\^\(\?:https\?:\\\/\\\/\)/);
+  // A filter field above the skills, with the filter of src/core/filter.ts.
+  assert.match(page.text, /<input id="filter" type="search" aria-label="Filter the skills"[^>]*>\s*<p id="nomatch" hidden><\/p>\s*<main hidden>/);
+  assert.match(script, /function matchesFilter\(/);
+  assert.match(script, /function filterWords\(/);
   // The SKILL.md and the names are shown as text, never as HTML.
   assert.doesNotMatch(page.text, /innerHTML/);
 });
@@ -102,7 +106,9 @@ async function pageScript(search: string) {
   const page = await get('/');
   const script = /<script>([\s\S]*?)<\/script>/.exec(page.text)?.[1] ?? '';
   const elements: Record<string, FakeElement> = {};
-  for (const id of ['scan', 'status', 'warnings', 'skills', 'skill']) elements[id] = new FakeElement(id);
+  for (const id of ['scan', 'status', 'warnings', 'skills', 'skill', 'filter', 'nomatch']) elements[id] = new FakeElement(id);
+  elements.filter.value = '';
+  const addresses: string[] = [];
   const field = new FakeElement('input');
   const button = new FakeElement('button');
   elements.scan.elements = { repository: field };
@@ -122,7 +128,7 @@ async function pageScript(search: string) {
     },
     window: { addEventListener: (type: string, listener: () => void) => (windowListeners[type] = listener) },
     location,
-    history: { pushState: () => {}, replaceState: () => {} },
+    history: { pushState: (_: unknown, __: string, to: string) => addresses.push(to), replaceState: (_: unknown, __: string, to: string) => addresses.push(to) },
     URLSearchParams,
     Date,
     setInterval: (callback: () => void) => (timers.set(++timerId, callback), timerId),
@@ -141,6 +147,15 @@ async function pageScript(search: string) {
   return {
     status: elements.status,
     list: elements.skills,
+    skill: elements.skill,
+    filter: elements.filter,
+    nomatch: elements.nomatch,
+    addresses,
+    /** Types into the filter field: what it holds, then its input event. */
+    type: (words: string) => {
+      elements.filter.value = words;
+      elements.filter.listeners.input({});
+    },
     main,
     button,
     fetches,
@@ -317,4 +332,105 @@ test('the browser terminal has no web view of its own', async () => {
   const served = await atlas(['serve']);
   assert.equal(served.code, 1);
   assert.equal(served.stderr, 'serve: the web view runs only from the command line');
+});
+
+/** A skill as the API answers it. */
+const answered = (repository: string, name: string, description: string) => ({
+  id: `${repository}:.claude/skills/${name}/SKILL.md`,
+  name,
+  description,
+  path: `.claude/skills/${name}/SKILL.md`,
+  link: `https://github.com/${repository}/blob/x/.claude/skills/${name}/SKILL.md`,
+  copies: [],
+  text: `# ${name}`,
+});
+
+const REPOSITORY = {
+  repository: { id: 'JetBrains/example', url: 'https://github.com/JetBrains/example' },
+  skills: [
+    answered('JetBrains/example', 'code-review', 'Review a pull request.'),
+    answered('JetBrains/example', 'commits', 'Write commit messages.'),
+    answered('JetBrains/example', 'review-tests', 'Check that the tests cover the change.'),
+  ],
+  warnings: [],
+};
+
+/** The names the page lists, and the selected skill's. */
+const listed = (page: Awaited<ReturnType<typeof pageScript>>) => ({
+  names: page.list.querySelectorAll('span').filter((span) => span.className === 'name').map((span) => span.textContent),
+  selected: page.skill.querySelector('h2')?.textContent,
+});
+
+test('the page: the filter field, instant on the scan already done; N of M skills; the selected skill stays when it still matches', async () => {
+  const page = await pageScript('?repository=https://github.com/JetBrains/example&skill=.claude/skills/review-tests/SKILL.md');
+  assert.equal(page.filter.hidden, true, 'no filter while it scans');
+  await page.fetches[0].answer(REPOSITORY);
+  assert.equal(page.filter.hidden, false);
+  assert.equal(page.status.textContent, 'JetBrains/example · 3 skills');
+  assert.deepEqual(listed(page), { names: ['code-review', 'commits', 'review-tests'], selected: 'review-tests' });
+
+  // A word of a name, a prefix, any case: never a new scan.
+  page.type('REV');
+  assert.equal(page.fetches.length, 1);
+  assert.equal(page.status.textContent, 'JetBrains/example · 2 of 3 skills');
+  assert.deepEqual(listed(page), { names: ['code-review', 'review-tests'], selected: 'review-tests' });
+  // Several words, in the name or the description, with separators: the selected one no longer matches → the first that does.
+  page.type('Code_Review pull');
+  assert.deepEqual(listed(page), { names: ['code-review'], selected: 'code-review' });
+  page.type('messages');
+  assert.deepEqual(listed(page), { names: ['commits'], selected: 'commits' });
+  assert.equal(page.nomatch.hidden, true);
+  // No match: an empty list and a message.
+  page.type('deploy');
+  assert.equal(page.status.textContent, 'JetBrains/example · 0 of 3 skills');
+  assert.deepEqual(listed(page), { names: [], selected: undefined });
+  assert.equal(page.main.hidden, true);
+  assert.equal(page.nomatch.hidden, false);
+  assert.equal(page.nomatch.textContent, 'No skill matches "deploy"');
+  // Cleared: every skill again.
+  page.type('');
+  assert.equal(page.status.textContent, 'JetBrains/example · 3 skills');
+  assert.equal(page.nomatch.hidden, true);
+  assert.equal(page.fetches.length, 1, 'filtering never scans again');
+});
+
+test('the page: the address keeps &q=<words>; a reload shows the same filtered view; a new scan keeps the filter', async () => {
+  const page = await pageScript('?repository=https://github.com/JetBrains/example');
+  await page.fetches[0].answer(REPOSITORY);
+  page.type('review');
+  assert.equal(page.addresses.at(-1), '?repository=https%3A%2F%2Fgithub.com%2FJetBrains%2Fexample&q=review&skill=.claude%2Fskills%2Fcode-review%2FSKILL.md');
+
+  const reloaded = await pageScript(page.addresses.at(-1)!);
+  assert.equal(reloaded.filter.value, 'review');
+  assert.equal(reloaded.fetches[0].url, '/api/scan?repository=' + encodeURIComponent('https://github.com/JetBrains/example'), 'the page filters, not the API');
+  await reloaded.fetches[0].answer(REPOSITORY);
+  assert.equal(reloaded.status.textContent, 'JetBrains/example · 2 of 3 skills');
+  assert.deepEqual(listed(reloaded), { names: ['code-review', 'review-tests'], selected: 'code-review' });
+
+  reloaded.submit('https://github.com/JetBrains/other');
+  assert.equal(reloaded.addresses.at(-1), '?repository=https%3A%2F%2Fgithub.com%2FJetBrains%2Fother&q=review');
+});
+
+test('the page: an organization, filtered: N of M skills in K repositories; repositories without a match are not shown', async () => {
+  const organization = {
+    owner: { name: 'JetBrains', url: 'https://github.com/JetBrains' },
+    scanned: 5,
+    repositories: [
+      { repository: { id: 'JetBrains/MPS', url: 'https://github.com/JetBrains/MPS' }, skills: [answered('JetBrains/MPS', 'bugfix', 'Fix a bug.'), answered('JetBrains/MPS', 'code-review', 'Review MPS code.')] },
+      { repository: { id: 'JetBrains/koog', url: 'https://github.com/JetBrains/koog' }, skills: [answered('JetBrains/koog', 'docs', 'Write the docs.')] },
+      { repository: { id: 'JetBrains/kotlin', url: 'https://github.com/JetBrains/kotlin' }, skills: [answered('JetBrains/kotlin', 'review', 'Review a change.')] },
+    ],
+    warnings: [],
+  };
+  const page = await pageScript('?repository=https://github.com/JetBrains&q=review&skill=JetBrains/kotlin:.claude/skills/review/SKILL.md');
+  await page.fetches[0].answer(organization);
+  assert.equal(page.status.textContent, 'JetBrains · 2 of 4 skills in 2 repositories');
+  const groups = page.list.children.filter((item) => typeof item !== 'string' && item.className === 'repository').map((item) => (item as FakeElement).textContent);
+  assert.deepEqual(groups, ['JetBrains/MPS · 1 of 2 skills', 'JetBrains/kotlin · 1 of 1 skill']);
+  assert.deepEqual(listed(page), { names: ['code-review', 'review'], selected: 'review' });
+  page.type('');
+  assert.equal(page.status.textContent, 'JetBrains · 4 skills in 3 repositories');
+  page.type('nothing here');
+  assert.equal(page.status.textContent, 'JetBrains · 0 of 4 skills in 0 repositories');
+  assert.equal(page.nomatch.textContent, 'No skill matches "nothing here"');
 });
