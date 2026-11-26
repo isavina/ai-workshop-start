@@ -71,12 +71,22 @@ say so, and what was checked.
 
 ## Label the pull request
 
-Reviewing a pull request, and leaving at least one finding to address → label it `review-suggested`,
-so it shows that the author has work to do. No finding → no label.
+The last step of reviewing a pull request. At least one finding to address → label it
+`review-suggested`: the label starts [address-review](../address-review/SKILL.md), which removes it
+once every point is answered. No finding → no label, and the loop ends.
 
 ```console
 $ gh label create review-suggested --color FBCA04 --description "A review left suggestions to address" --force
+$ gh pr edit <number> --remove-label review-suggested   # a label already on it fires no event
 $ gh pr edit <number> --add-label review-suggested
 ```
 
-The author removes it with [address-review](../address-review/SKILL.md) once every point is answered.
+At most three rounds. Count how often the label was added before:
+
+```console
+$ gh api --paginate repos/<owner>/<repo>/issues/<number>/events \
+    --jq '.[] | select(.event == "labeled" and .label.name == "review-suggested") | .id' | wc -l
+```
+
+Three or more → do not add it again; comment on the pull request that the review loop stopped after
+three rounds, with the findings still open, for a person to decide.

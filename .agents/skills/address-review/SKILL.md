@@ -54,7 +54,8 @@ Then review the change with [code-review](../code-review/SKILL.md).
 One commit for the review, the subject `Address review of #<number>: <what>`, the body one line a comment.
 
 Push only when the user asked for it, and say first what the push adds: the review commit and any local
-commit from step 1. On a branch already reviewed, never rebase or force-push; for conflicts with the
+commit from step 1. In an automation that pushes to the pull request's branch, the platform pushes the
+commit when the run ends: do not push yourself. On a branch already reviewed, never rebase or force-push; for conflicts with the
 base, merge it in:
 
 ```console
@@ -76,13 +77,16 @@ checked and why nothing changed.
 ## 6. Remove the label
 
 Once every comment is answered (fixed and replied to, or replied to with why not) and the fixes are
-pushed, remove the label the review added ([code-review](../code-review/SKILL.md)):
+pushed, remove the label the review added ([code-review](../code-review/SKILL.md)). In an automation,
+where the platform pushes after the run, the fixes only need to be committed: removing the label is
+the run's last action.
 
 ```console
 $ gh pr edit <number> --remove-label review-suggested
 ```
 
-A comment still open, waiting on the reviewer's answer or on a push → the label stays.
+The push starts the review again; it adds the label back if anything is left. A comment still open,
+waiting on the reviewer's answer → the label stays.
 
 ## Report
 
