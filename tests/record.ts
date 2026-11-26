@@ -3,6 +3,8 @@
 //   GITHUB_TOKEN=… node tests/record.ts github.com/<owner>/<repo>/tree/<commit>
 // Writes tests/recordings/<owner>-<repo>-<commit>.json and .txt. The answers keep only what the scan reads.
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { openGitHub, parseGitHubUrl } from '../src/core/github.ts';
 import { replay, type Recording } from '../src/core/replay.ts';
 import { scan } from '../src/core/scan.ts';
@@ -29,16 +31,16 @@ await scan(
   }),
 );
 
-const file = new URL(`recordings/${name.owner}-${name.repo}-${name.ref}`, import.meta.url);
-mkdirSync(new URL('.', file), { recursive: true });
+const file = fileURLToPath(new URL(`recordings/${name.owner}-${name.repo}-${name.ref}`, import.meta.url));
+mkdirSync(dirname(file), { recursive: true });
 // One answer a line, by URL: small, the same for the same answers (files are read at once, in any
 // order), and a new recording diffs answer by answer.
 const lines = Object.entries(recording).sort(([a], [b]) => (a < b ? -1 : 1)).map(([url, answer]) => `${JSON.stringify(url)}: ${JSON.stringify(answer)}`);
-writeFileSync(`${file.pathname}.json`, `{\n${lines.join(',\n')}\n}\n`);
+writeFileSync(`${file}.json`, `{\n${lines.join(',\n')}\n}\n`);
 // The output, from the recording, exactly as the end-to-end tests replay it.
 const output = await atlas(['scan', input], { github: replay(recording) });
-writeFileSync(`${file.pathname}.txt`, printed(output));
-console.log(`${Object.keys(recording).length} answers → ${file.pathname}.json; the output → .txt`);
+writeFileSync(`${file}.txt`, printed(output));
+console.log(`${Object.keys(recording).length} answers → ${file}.json; the output → .txt`);
 
 /** Only the fields the scan reads: a truncated tree only says that it is, a file has no hash. */
 function shrink(url: string, body: any): unknown {

@@ -171,7 +171,11 @@ test('a branch, tag or commit: /tree/<ref> is resolved to the commit the links p
       status: 200,
       body: '---\nname: commits\ndescription: Write commit messages.\n---\n',
     },
-    'https://api.github.com/repos/JetBrains/example/commits/no-such-branch': { status: 404, body: { message: 'Not Found' } },
+    // What GitHub answers for an unknown branch, tag or commit: 422, not 404.
+    'https://api.github.com/repos/JetBrains/example/commits/no-such-branch': {
+      status: 422,
+      body: { message: 'No commit found for SHA: no-such-branch' },
+    },
   });
   // With a token: code search sees only the default branch, so the tree is listed.
   const release = await atlas(['scan', 'https://github.com/JetBrains/example/tree/release/1.0/'], { github });

@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { replay, type Recording } from '../src/core/replay.ts';
 import { atlas, printed } from './helpers.ts';
 
@@ -12,7 +13,7 @@ import { atlas, printed } from './helpers.ts';
  * checking that it prints exactly the stored output.
  */
 async function scanAt(repository: string, commit: string) {
-  const file = new URL(`recordings/${repository.replace('/', '-')}-${commit}`, import.meta.url).pathname;
+  const file = fileURLToPath(new URL(`recordings/${repository.replace('/', '-')}-${commit}`, import.meta.url));
   const recording: Recording = JSON.parse(readFileSync(`${file}.json`, 'utf8'));
   // With a token, so it shows that a fixed commit is listed through its tree, not code search.
   const output = await atlas(['scan', `github.com/${repository}/tree/${commit}`], { github: replay(recording) });
