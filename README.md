@@ -15,6 +15,9 @@ build-tools-bump-gradle-api — Bumps the Gradle API version that Kotlin Gradle 
 
 Scan a branch, tag or commit with `…/tree/<ref>`. Set `GITHUB_TOKEN` for a higher GitHub rate limit.
 
+Or in the browser: `./skill-atlas serve` opens a local web view at http://localhost:4173, with a field
+for a repository, its skills and each one's SKILL.md ([spec/web.md](spec/web.md)).
+
 `npm test` runs the tests, offline: the end-to-end ones replay what GitHub answered for real repositories at
 fixed commits and compare the output with the stored one, both in [tests/recordings/](tests/recordings/)
 (`.json`, `.txt`). To add or refresh one:

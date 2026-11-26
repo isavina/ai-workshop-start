@@ -3,6 +3,7 @@
 `./skill-atlas scan github.com/JetBrains/MPS/tree/<commit>`: at a branch, tag or commit
 Prints the result **at once**; *nothing is stored*.
 `GITHUB_TOKEN`, optional: a higher GitHub rate limit.
+`./skill-atlas serve [port]`: the [web view](web.md).
 ## Output
 ```
 JetBrains/kotlin · 6 skills
