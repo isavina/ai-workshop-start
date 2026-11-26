@@ -49,7 +49,7 @@ else (docs, test data, `node_modules`) is not one. The edge cases are in
 ## Development
 
 ```console
-$ npm test            # all tests, offline, the browser tests included
+$ npm test            # all tests but the browser ones, offline, nothing to set up
 $ npm run typecheck
 ```
 
@@ -61,16 +61,18 @@ and `npx playwright show-report` shows them all.
 
 ```console
 $ npx playwright install --with-deps chromium         # once
-$ npm run test:browser                                # only the browser tests
+$ npm run test:browser                                # the browser tests
 $ PLAYWRIGHT_CHANNEL=chrome npm run test:browser      # with an installed Google Chrome instead
 ```
 
 The screenshots are compared pixel for pixel, so they depend on the browser and the fonts. CI runs in
 Playwright's image, `mcr.microsoft.com/playwright:v<version in package.json>-noble`; after a change to
-the look, make new baselines in the same image, and review them:
+the look, make new baselines in the same image, and review them. The baselines are Linux ones
+(`*-linux.png`): on macOS or Windows, run the browser tests in this image too. `--user` keeps the files
+it writes yours, not root's:
 
 ```console
-$ docker run --rm --network=host --ipc=host -v "$PWD":/work -w /work \
+$ docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp --network=host --ipc=host -v "$PWD":/work -w /work \
     mcr.microsoft.com/playwright:v1.65.1-noble npx playwright test --update-snapshots
 ```
 

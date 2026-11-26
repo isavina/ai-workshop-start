@@ -27,6 +27,7 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      - run: npm run test:browser
       # A video of every browser test; on a failure, the actual and the diff screenshots too.
       - uses: actions/upload-artifact@v7
         if: ${{ !cancelled() }}
