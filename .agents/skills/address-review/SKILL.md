@@ -37,10 +37,14 @@ $ gh api graphql --paginate -F owner=<owner> -F repo=<repo> -F number=<number> -
 ```
 
 `id` is the comment to reply to. `<login>` is the account the replies are posted from. GraphQL gives
-a bot's login without `[bot]`. `<signature>` is the signature on our replies, or `""` when we do not
-sign them. When the review and this skill post from the same account, for example one bot running
-both, the signature is the only way to tell our replies from the reviewer's comments. Each node is a
-whole thread, so a `--jq` that runs once per page still sees every thread whole.
+a bot's login without `[bot]`. `<signature>` is the part of our replies' signature that is the same on
+every run and that the reviewer's comments do not contain, for example
+`Name: Address Review Skill Runner / Run:`. Never the run link: it changes on every run, so a full
+signature matches no earlier reply and every thread waits again. `Produced by Air Automations.` alone
+is not enough when the review is signed with it too. `""` when we do not sign our replies. When the
+review and this skill post from the same account, for example one bot running both, the signature is
+the only way to tell our replies from the reviewer's comments. Each node is a whole thread, so a
+`--jq` that runs once per page still sees every thread whole.
 
 Then check out the pull request's branch and compare it with the remote:
 
