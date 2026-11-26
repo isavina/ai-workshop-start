@@ -25,6 +25,7 @@ A failing test or type error is the first finding. The tests never reach the net
 - Every case in the spec has an integration test: through `atlas()` in `tests/helpers.ts`, the CLI
   itself or, for the web view, its server in `tests/web.test.ts`; not a unit test of a helper.
 - A new case of where skills live goes into `fixture/` and its table in `fixture/README.md`.
+- A change a user would see (output, a message, the page) updates the script in `qa/` that shows it.
 - Output changed on purpose → the `.txt` files in `tests/recordings/` are refreshed with
   `npm run record -- github.com/<owner>/<repo>/tree/<commit>`; read their diff, it is the change.
 
