@@ -30,3 +30,14 @@ a message the CLI would exit 1 for → status 400, `{ error }`
 
 `GET /api/scan?repository=github.com/<owner>` → `{ owner: { name, url }, scanned, repositories, warnings }`;
 each of `repositories`, with skills only: `{ repository, skills }`, as above
+## Look
+How the page looks is part of what it does: a real browser compares it, pixel for pixel, with a
+baseline screenshot (`tests/browser/screenshots/`), 1280×800, light and dark
+- The bare page: the field, the hint, no skills
+- A directory scanned: the total, the warnings, the skills, the first SKILL.md selected
+- A skill selected, after a reload: its SKILL.md, its link, `also in`
+- A GitHub repository scanned, a link pinned to its commit
+- An error, in the error colour
+- The same scan in dark mode
+
+Every browser test is recorded as a video, kept whether it passes or fails

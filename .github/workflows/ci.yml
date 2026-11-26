@@ -13,6 +13,11 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # The browser tests compare pixels: they run where their baselines were made, Playwright's image,
+    # its Chromium, fonts and ffmpeg. Its version is the one in package.json.
+    container:
+      image: mcr.microsoft.com/playwright:v1.65.1-noble
+      options: --ipc=host
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -22,6 +27,16 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      - run: npm run test:browser
+      # A video of every browser test; on a failure, the actual and the diff screenshots too.
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: browser-tests
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 14
       # The real CLI on the fixture repository, as a user would run it: it must exit 0.
       - name: Smoke test
         run: |
