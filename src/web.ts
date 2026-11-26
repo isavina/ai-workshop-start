@@ -83,6 +83,8 @@ const PAGE = `<!doctype html>
   button { font: inherit; color: inherit; cursor: pointer; }
   form button { padding: 8px 16px; background: var(--accent); color: #fff; border: 0; border-radius: 6px; }
   form button:disabled { opacity: .6; cursor: progress; }
+  #hint { margin: 6px 0 0; max-width: 960px; color: var(--muted); font-size: 13px; }
+  #hint code { font: 12px ui-monospace, monospace; }
   #status { margin: 12px 24px 0; }
   #status.error { color: var(--error); }
   #warnings { margin: 8px 24px 0; padding-left: 20px; color: var(--warn); }
@@ -106,9 +108,12 @@ const PAGE = `<!doctype html>
 <header>
   <h1>Skill Atlas</h1>
   <form id="scan">
-    <input name="repository" aria-label="Repository" placeholder="https://github.com/isavina/ai-workshop-start, …/tree/<branch, tag or commit>, or a directory" required>
+    <input name="repository" aria-label="Repository" aria-describedby="hint" placeholder="https://github.com/isavina/ai-workshop-start" required>
     <button type="submit">Scan</button>
   </form>
+  <p id="hint">Paste a GitHub repository URL, such as <code>https://github.com/isavina/ai-workshop-start</code>.
+    For a branch, tag or commit, add <code>/tree/&lt;name or hash&gt;</code>.
+    A directory on this machine, such as <code>/home/me/my-project</code>, works too.</p>
 </header>
 <p id="status" role="status"></p>
 <ul id="warnings"></ul>

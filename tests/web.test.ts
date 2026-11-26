@@ -34,7 +34,12 @@ test('the page: a field for a repository, the skills and the selected SKILL.md',
   const page = await get('/');
   assert.equal(page.status, 200);
   assert.equal(page.type, 'text/html; charset=utf-8');
-  assert.match(page.text, /<input name="repository"[^>]*placeholder="https:\/\/github\.com\/isavina\/ai-workshop-start/);
+  assert.match(page.text, /<input name="repository"[^>]*aria-describedby="hint"[^>]*placeholder="https:\/\/github\.com\/isavina\/ai-workshop-start"/);
+  // Under the field, a hint on what to paste there: a GitHub URL, /tree/<ref>, or a directory.
+  const hint = /<p id="hint">([\s\S]*?)<\/p>/.exec(page.text)?.[1] ?? '';
+  assert.match(hint, /Paste a GitHub repository URL, such as <code>https:\/\/github\.com\/isavina\/ai-workshop-start<\/code>/);
+  assert.match(hint, /<code>\/tree\/&lt;name or hash&gt;<\/code>/);
+  assert.match(hint, /A directory on this machine/);
   assert.match(page.text, /<ul id="skills">/);
   assert.match(page.text, /<article id="skill">/);
   // The address keeps the scan and the selected skill.

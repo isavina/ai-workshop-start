@@ -4,6 +4,7 @@
 - A port in use, or not a port → a clear message, exit code 1
 ## Page
 - A **field** for a repository: what `scan` takes, a GitHub URL, `…/tree/<ref>` or a directory
+- Under it, a **hint** on what to paste there, with an example
 - Its **skills**: the same scan, the same order; name, *full* description, path
 - The selected skill's **SKILL.md**: as it is, front matter included; its link, `also in`
 - Warnings and errors: the same messages as the CLI, on the page
