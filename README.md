@@ -62,6 +62,7 @@ $ GITHUB_TOKEN=$(gh auth token) npm run record -- github.com/JetBrains/MPS/tree/
 ```
 
 - [spec/](spec/): what it does; update it with the code.
+- [qa/](qa/README.md): the manual test scripts, run by hand or with the [qa skill](.agents/skills/qa/SKILL.md).
 - [AGENTS.md](AGENTS.md): the definition of done.
 - [fixture/](fixture/README.md): a small repository, one directory per edge case.
 - [.agents/skills/code-review](.agents/skills/code-review/SKILL.md): how a change is reviewed.
