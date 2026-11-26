@@ -1,6 +1,6 @@
 ---
 name: code-review
-description: Review a change to Skill Atlas against its spec, its architecture and its tests. Use before committing, when asked to review a diff, a branch or a pull request, or when checking work another agent did.
+description: Review a change to Skill Atlas, the CLI or the web view, against its spec, its architecture and its tests. Use before committing, when asked to review a diff, a branch or a pull request, or when checking work another agent did.
 ---
 
 # Code review
@@ -22,8 +22,8 @@ A failing test or type error is the first finding. The tests never reach the net
 
 **Spec and tests**
 - A change in behaviour changes `spec/` in the same commit, in its terse style: one line a decision.
-- Every case in the spec has an integration test: through `atlas()` in `tests/helpers.ts` or the CLI
-  itself, not a unit test of a helper.
+- Every case in the spec has an integration test: through `atlas()` in `tests/helpers.ts`, the CLI
+  itself or, for the web view, its server in `tests/web.test.ts`; not a unit test of a helper.
 - A new case of where skills live goes into `fixture/` and its table in `fixture/README.md`.
 - Output changed on purpose → the `.txt` files in `tests/recordings/` are refreshed with
   `npm run record -- github.com/<owner>/<repo>/tree/<commit>`; read their diff, it is the change.
@@ -34,9 +34,10 @@ A failing test or type error is the first finding. The tests never reach the net
 
 **Architecture**
 - Core is fetch → find → parse in `src/core/`, with no Node APIs: the browser runs it too.
-  The CLI (`src/cli.ts`) and the commands (`src/commands.ts`) stay thin.
+  The CLI (`src/cli.ts`), the commands (`src/commands.ts`) and the web view (`src/web.ts`) stay thin:
+  they call `scan` with the same `open`, and none of them finds or parses skills on its own.
 - A failure the user can fix is an `AtlasError` with a clear message: exit code 1, no stack trace.
-- Warnings go to stderr, results to stdout; the scan goes on after a warning.
+- Warnings go to stderr, results to stdout (on the page: the warnings list); the scan goes on after a warning.
 - Nothing is stored: no files written, no caches between runs.
 - Output is deterministic: sorted by name, then path, without the locale.
 
@@ -45,6 +46,18 @@ A failing test or type error is the first finding. The tests never reach the net
 - The scanned commit is resolved once, and every link and file read pins it.
 - Code search only with a token and only on the default branch; elsewhere, the tree.
 - Rate limits, 404 and unreachable GitHub each end in their own message.
+
+**Web view** (spec/web.md)
+- The server listens on `127.0.0.1` only, never on all interfaces: the field reads any local directory.
+- The page shows what the CLI shows: the same skills, order, copies, warnings and error messages.
+  An `AtlasError` → status 400 `{ error }`; anything else → 500. A new or renamed field of
+  `GET /api/scan` changes spec/web.md and `tests/web.test.ts` with it.
+- A `SKILL.md`, a name or a description comes from any repository someone types in: it goes into the
+  page as text (`textContent`, `<pre>`), never as HTML (`innerHTML`, `insertAdjacentHTML`), and a link's
+  `href` comes only from `skillLink` or the repository's URL.
+- The address keeps `?repository=…&skill=<path>`; a reload shows the same skill.
+- Nothing stored here either: `Cache-Control: no-store`, no `localStorage`, no scan kept between requests.
+- `serve`: a port in use, or not a port → a clear message, exit code 1.
 
 **Code**
 - Reads like the code around it: short doc comments on exports, plain names, no dead code.
