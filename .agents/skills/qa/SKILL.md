@@ -37,7 +37,7 @@ Drive the page with a script in `/tmp/qa-browser`: `chromium.launch()`, `page.go
 sees: `page.locator('#status').textContent()`, `#warnings li`, `#skills .name`, `#skill pre`,
 `page.url()`, `page.goBack()`, `page.reload()`, and `page.on('dialog', …)` for an alert. Take a
 screenshot for each step into the evidence directory. Use the visible text, not the server's JSON:
-the JSON is what QA-5 step 10 checks.
+the JSON is what QA-5 step 14 checks.
 
 No browser can be installed (no network for its download) → the browser steps are **blocked**; their
 API part (the same scan through `curl …/api/scan`) can still be checked and said so. Never mark a

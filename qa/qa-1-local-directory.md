@@ -42,6 +42,43 @@ skill, copies, and warnings ([spec/analysis.md](../spec/analysis.md#project-skil
 
    Expected: the same skills as step 1.
 
-5. `git status --short`
+5. `./skill-atlas scan fixture --filter commit 2>/dev/null`
+
+   Expected, exit code 0: only the skills with a word starting `commit` in their name or description
+   ([spec/cli.md](../spec/cli.md#filter)); `code-style` for its `committing`:
+   ```
+   fixture · 2 of 5 skills
+   code-style — Follow the project's code style.
+     file://<root>/fixture/.github/skills/code-style/SKILL.md
+   commits — Write commit messages the way this repository does.
+     file://<root>/fixture/.claude/skills/commits/SKILL.md
+     also in .github/skills/commits/SKILL.md
+   ```
+
+6. `./skill-atlas scan fixture --filter=Build_Gradle 2>/dev/null`, then `--filter "use before"`
+
+   Expected: `fixture · 1 of 5 skills`, only `build`: case and separators do not matter. Then
+   `fixture · 2 of 5 skills`, `build` and `code-style`: every word, in the name or the description.
+
+7. `./skill-atlas scan fixture --filter mit 2>/dev/null; echo $?`
+
+   Expected: a word matches only the start of a word, so nothing here:
+   ```
+   fixture · 0 of 5 skills
+   No skill matches "mit"
+   0
+   ```
+
+8. `./skill-atlas scan fixture --filter commit >/dev/null`
+
+   Expected: the same two warnings as step 3: the warnings are the scan's, filtered or not.
+
+9. `./skill-atlas scan fixture --filter -`, then `./skill-atlas scan fixture --filter`, then `--filter a --filter b`
+
+   Expected: first `fixture · 5 skills`, every skill, as without `--filter`: no words to filter by. Then,
+   twice, on stderr, exit code 1:
+   `Usage: skill-atlas scan <GitHub URL | directory> [--filter <words>]`.
+
+10. `git status --short`
 
    Expected: nothing new: the scan stored nothing.

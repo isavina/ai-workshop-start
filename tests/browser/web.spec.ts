@@ -57,3 +57,21 @@ test('dark mode: the same page in dark colours', async ({ page }) => {
   await expect(page.getByRole('status')).toHaveText('fixture · 5 skills');
   await expect(page).toHaveScreenshot('directory-dark.png');
 });
+
+test('a filter: only the matches, marked; N of M skills; kept in the address', async ({ page }) => {
+  await page.goto('/?repository=fixture');
+  await page.keyboard.press('/');
+  await expect(page.getByLabel('Filter skills')).toBeFocused();
+  await page.keyboard.type('use before');
+  await expect(page.getByRole('status')).toHaveText('fixture · 2 of 5 skills');
+  await expect(page.locator('#skills .name')).toHaveText(['build', 'code-style']);
+  await expect(page).toHaveURL(/[?&]q=use\+before/);
+  await page.reload();
+  await expect(page.getByLabel('Filter skills')).toHaveValue('use before');
+  await expect(page.locator('#skills .name')).toHaveText(['build', 'code-style']);
+  await expect(page).toHaveScreenshot('filtered.png');
+  await page.getByLabel('Filter skills').fill('deploy');
+  await expect(page.locator('#skills')).toHaveText('No skill matches "deploy"');
+  await page.getByLabel('Filter skills').press('Escape');
+  await expect(page.getByRole('status')).toHaveText('fixture · 5 skills');
+});
