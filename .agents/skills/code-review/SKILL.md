@@ -69,11 +69,45 @@ Findings first, the most severe first. Each one: `file:line`, what is wrong, and
 (a repository, a path, a command and what it prints). Then what was run and its result. No finding →
 say so, and what was checked.
 
-## Label the pull request
+## In the review loop
 
-The last step of reviewing a pull request. At least one finding to address → label it
-`review-suggested`: the label starts [address-review](../address-review/SKILL.md), which removes it
-once every point is answered. No finding → no label, and the loop ends.
+A pull request is reviewed by an automation on every new commit; [address-review](../address-review/SKILL.md)
+answers. Both may post from the same account, so each comment carries a hidden marker that says what
+it is. Markers are HTML comments on the comment's last line:
+
+| Comment | Marker |
+| --- | --- |
+| A review's summary | `<!-- skill-atlas:review sha=<head commit> -->` |
+| A finding, or a follow-up in a finding's thread | `<!-- skill-atlas:finding key=<path>#<slug> -->` |
+| An answer ([address-review](../address-review/SKILL.md)) | `<!-- skill-atlas:reply to=<comment id> -->` |
+
+`<slug>` names the problem in a few words, `cap-check-order`: the same problem keeps its key.
+
+**One review a commit.** First, the head commit and the reviews of it:
+
+```console
+$ gh pr view <number> --json headRefOid --jq .headRefOid
+$ gh api --paginate repos/<owner>/<repo>/pulls/<number>/reviews --jq '.[].body' | grep -o 'skill-atlas:review sha=[0-9a-f]*'
+```
+
+The head commit already reviewed → stop: no comment, no label. An earlier commit reviewed → review only
+what changed since it, `git diff <that sha>..<head>`; none → the whole pull request.
+
+**No comment twice.** Before posting, read every review comment, resolved threads included:
+
+```console
+$ gh api --paginate repos/<owner>/<repo>/pulls/<number>/comments --jq '.[] | {id, in_reply_to_id, path, line, body}'
+```
+
+- A finding whose key, or whose problem at the same place, is already there → do not post it again.
+- Answered as fixed, but still wrong → one follow-up in that thread, with the finding's marker; not a
+  new comment. Already followed up since the answer → nothing.
+- Post the new findings and the summary in one review (`gh api …/pulls/<number>/reviews`), so a run
+  that stops halfway leaves nothing.
+
+**Label.** The last step. This review posted a new finding or follow-up → label the pull request
+`review-suggested`; that starts address-review, which removes the label. Nothing new → no label,
+and the loop ends.
 
 At most three rounds, so count first how often the label was added before:
 
@@ -92,3 +126,5 @@ $ gh pr edit <number> --add-label review-suggested
 
 Three or more → do not add it again; comment on the pull request that the review loop stopped after
 three rounds, with the findings still open, for a person to decide.
+
+Never commit or push from a review: a new commit starts the next review.
