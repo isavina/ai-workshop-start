@@ -1,27 +1,58 @@
 # Skill Atlas
 
-Every agent skill in a repository: `./skill-atlas scan` finds each `SKILL.md` and prints its name,
-description and link.
+Every agent skill in a repository, in the terminal: `./skill-atlas scan` finds each project skill's
+`SKILL.md` and prints its name, description and link. It reads GitHub through its API: no clone,
+nothing stored.
 
 ```console
 $ npm ci
-$ ./skill-atlas scan https://github.com/JetBrains/kotlin
-JetBrains/kotlin · 6 skills
-…
-build-tools-bump-gradle-api — Bumps the Gradle API version that Kotlin Gradle plugins are compiled against in the Kotlin compiler repository.
-  https://github.com/JetBrains/kotlin/blob/5ab6270ab772d113e8ad52ebfcaa0109c522ae00/.claude/skills/build-tools-bump-gradle-api/SKILL.md
-…
+$ ./skill-atlas scan github.com/JetBrains/koog/tree/709079e4a34d6c9234583352550e6a2b88a0bb85
+JetBrains/koog · 2 skills
+add-java-code-snippets-in-docs — Use when the user asks to add Java tabs/examples to mkdocs docs that already have Kotlin examples (files under docs/docs/**.md using === "Kotlin" / Knit INCLUDE+SUFFIX blocks).
+  https://github.com/JetBrains/koog/blob/709079e4a34d6c9234583352550e6a2b88a0bb85/.claude/skills/add-java-code-snippets-in-docs/SKILL.md
+split-jvm-nonjvm — Splits a class or several classes in the common source set commonMain into JVM and non-JVM parts into jvmCommonMain and nonJvmCommonMain.
+  https://github.com/JetBrains/koog/blob/709079e4a34d6c9234583352550e6a2b88a0bb85/.claude/skills/split-jvm-nonjvm/SKILL.md
 ```
 
-Scan a branch, tag or commit with `…/tree/<ref>`. Set `GITHUB_TOKEN` for a higher GitHub rate limit.
+Requires Node.js 24 or later.
 
-`npm test` runs the tests, offline: the end-to-end ones replay what GitHub answered for real repositories at
-fixed commits and compare the output with the stored one, both in [tests/recordings/](tests/recordings/)
-(`.json`, `.txt`). To add or refresh one:
+## Usage
+
+```console
+$ ./skill-atlas scan https://github.com/JetBrains/kotlin            # the default branch
+$ ./skill-atlas scan github.com/JetBrains/MPS/tree/<branch, tag or commit>
+$ ./skill-atlas scan ~/projects/my-repository                       # a local checkout
+```
+
+- Skills are sorted by name; each shows its description's first sentence and a link pinned to the
+  scanned commit. `also in` lists the same skill in other agents' folders.
+- Warnings, such as malformed front matter, go to stderr; the scan goes on.
+- GitHub allows 60 requests an hour without a token. Set `GITHUB_TOKEN` for more, for example
+  `GITHUB_TOKEN=$(gh auth token) ./skill-atlas scan …`.
+
+## What counts as a skill
+
+A project skill is `<root>/<skill>/SKILL.md`, where the root is `.agents/skills`, `.claude/skills`,
+`.github/skills` or `agent/skills`, at the repository root or in a subproject. A `SKILL.md` anywhere
+else (docs, test data, `node_modules`) is not one. The edge cases are in
+[spec/analysis.md](spec/analysis.md#project-skill).
+
+## Development
+
+```console
+$ npm test            # all tests, offline
+$ npm run typecheck
+```
+
+The end-to-end tests replay what GitHub answered for real repositories at fixed commits and compare
+the output with the stored one; both are in [tests/recordings/](tests/recordings/). To add or
+refresh one:
 
 ```console
 $ GITHUB_TOKEN=$(gh auth token) npm run record -- github.com/JetBrains/MPS/tree/<full commit hash>
 ```
 
-- [spec/](spec/): what it does. [AGENTS.md](AGENTS.md): the definition of done.
-- [fixture/](fixture/README.md): a small repository for the tests.
+- [spec/](spec/): what it does; update it with the code.
+- [AGENTS.md](AGENTS.md): the definition of done.
+- [fixture/](fixture/README.md): a small repository, one directory per edge case.
+- [.agents/skills/code-review](.agents/skills/code-review/SKILL.md): how a change is reviewed.
