@@ -21,7 +21,20 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
+      # The browser tests: Google Chrome, as on the runner, and Playwright's ffmpeg for the videos.
+      - run: npx playwright install --with-deps ffmpeg
       - run: npm test
+        env:
+          PLAYWRIGHT_CHANNEL: chrome
+      # A video of every browser test; on a failure, the actual and the diff screenshots too.
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: browser-tests
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 14
       # The real CLI on the fixture repository, as a user would run it: it must exit 0.
       - name: Smoke test
         run: |

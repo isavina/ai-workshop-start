@@ -49,9 +49,24 @@ else (docs, test data, `node_modules`) is not one. The edge cases are in
 ## Development
 
 ```console
-$ npm test            # all tests, offline
+$ npm test            # all tests, offline, the browser tests included
 $ npm run typecheck
 ```
+
+The browser tests ([tests/browser/](tests/browser/), [Playwright](https://playwright.dev)) open the
+web view in Chromium, with GitHub answering from recorded answers, and compare each page with its
+baseline screenshot in [tests/browser/screenshots/](tests/browser/screenshots/). Every test is
+recorded: `test-results/<test>/video.webm`; a failure also leaves the actual and a diff image there,
+and `npx playwright show-report` shows them all.
+
+```console
+$ npx playwright install --with-deps chromium         # once
+$ npm run test:browser                                # only the browser tests
+$ PLAYWRIGHT_CHANNEL=chrome npm run test:browser      # with an installed Google Chrome instead
+$ npm run test:browser -- --update-snapshots          # after a change to the look: new baselines; review them
+```
+
+Baselines are per platform (`…-linux.png`): fonts render differently elsewhere. Make them where CI runs.
 
 The end-to-end tests replay what GitHub answered for real repositories at fixed commits and compare
 the output with the stored one; both are in [tests/recordings/](tests/recordings/). To add or
