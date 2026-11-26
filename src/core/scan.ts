@@ -20,6 +20,8 @@ export type ScanResult = { repository: Repository; skills: Skill[]; warnings: st
 export type Owner = {
   /** `https://github.com/<owner>`, as typed. */
   url: string;
+  /** Whether GitHub is asked with a token: without one, 60 requests an hour, a few repositories. */
+  authenticated: boolean;
   /** The owner's name as GitHub writes it, and its repositories as `owner/repo`, sorted. */
   list(): Promise<{ owner: string; repositories: string[] }>;
   /** One of the listed repositories. */

@@ -154,14 +154,90 @@ test('an unknown organization or user → a clear message, exit code 1', async (
   assert.equal(unknown.stderr, 'Organization or user not found: https://github.com/no-such-owner');
 });
 
-test('the web view: an organization → a clear message with status 400, and nothing asked of GitHub', async (t) => {
-  // Nothing recorded: a request to GitHub would be "Cannot reach GitHub".
-  const server = createWebServer({ open: opener({ github: replay({}) }) });
+/** `GET /api/scan?repository=<input>` on the web view's server, with GitHub answering from `github`. */
+async function webScan(input: string, options: { github: ReturnType<typeof replay>; token?: string }) {
+  const server = createWebServer({ open: opener(options) });
   const address = await listen(server, 0);
-  t.after(() => server.close());
-  const response = await fetch(`${address}/api/scan?repository=${encodeURIComponent('https://github.com/JetBrains')}`);
-  assert.equal(response.status, 400);
-  assert.deepEqual(await response.json(), {
-    error: 'One repository at a time: https://github.com/JetBrains is an organization or a user; skill-atlas scan https://github.com/JetBrains scans all of its repositories',
+  try {
+    const response = await fetch(`${address}/api/scan?repository=${encodeURIComponent(input)}`);
+    return { status: response.status, body: JSON.parse(await response.text()) };
+  } finally {
+    server.close();
+  }
+}
+
+test('the web view: an organization, the same scan as the CLI, its skills grouped by repository', async () => {
+  const cli = await atlas(['scan', 'https://github.com/Acme'], { github: replay(ACME) });
+  const { status, body } = await webScan('https://github.com/Acme', { github: replay(ACME) });
+  assert.equal(status, 200, JSON.stringify(body));
+  assert.deepEqual(body.owner, { name: 'Acme', url: 'https://github.com/Acme' });
+  assert.equal(body.scanned, 6);
+  // Only the repositories with skills, by owner/repo; each skill as for one repository.
+  assert.deepEqual(
+    body.repositories.map((group: { repository: { id: string }; skills: { id: string }[] }) => [group.repository.id, group.skills.map((skill) => skill.id)]),
+    [
+      ['Acme/Alpha', ['Acme/Alpha:web/.claude/skills/build/SKILL.md', 'Acme/Alpha:.agents/skills/review/SKILL.md']],
+      ['Acme/broken', ['Acme/broken:.claude/skills/plain/SKILL.md']],
+      ['Acme/zeta', ['Acme/zeta:.claude/skills/deploy/SKILL.md']],
+    ],
+  );
+  assert.deepEqual(body.repositories[2], {
+    repository: { id: 'Acme/zeta', url: 'https://github.com/Acme/zeta', commit: EXAMPLE_COMMIT },
+    skills: [
+      {
+        id: 'Acme/zeta:.claude/skills/deploy/SKILL.md',
+        name: 'deploy',
+        description: 'The deploy skill. More.',
+        path: '.claude/skills/deploy/SKILL.md',
+        link: `https://github.com/Acme/zeta/blob/${EXAMPLE_COMMIT}/.claude/skills/deploy/SKILL.md`,
+        copies: ['.github/skills/deploy/SKILL.md'],
+        text: skill('deploy'),
+      },
+    ],
   });
+  // The same links and warnings as the CLI prints.
+  for (const group of body.repositories) for (const { link } of group.skills) assert.ok(cli.stdout.split('\n').includes(`  ${link}`), link);
+  assert.equal(body.warnings.map((warning: string) => `warning: ${warning}`).join('\n'), cli.stderr);
+});
+
+test('the web view: an organization without GITHUB_TOKEN → a clear message, status 400, nothing asked of GitHub', async () => {
+  // Nothing recorded: a request to GitHub would be "Cannot reach GitHub".
+  assert.deepEqual(await webScan('https://github.com/JetBrains', { github: replay({}), token: '' }), {
+    status: 400,
+    body: {
+      error: 'https://github.com/JetBrains is an organization or a user: scanning all of its repositories takes a request or two each; set GITHUB_TOKEN and restart skill-atlas serve',
+    },
+  });
+});
+
+test('the web view: a tree too large is a warning; the rate limit or an unknown owner → status 400, no partial result', async () => {
+  const big = await webScan('github.com/Big', {
+    github: replay({
+      ...listing('Big', [{ name: 'mono' }, { name: 'small' }]),
+      [`${API}/repos/Big/mono/commits/main`]: { status: 200, body: { sha: EXAMPLE_COMMIT } },
+      [`${API}/repos/Big/mono/git/trees/${EXAMPLE_COMMIT}?recursive=1`]: { status: 200, body: { truncated: true, tree: [] } },
+      [`${API}/repos/Big/mono/git/trees/${EXAMPLE_COMMIT}`]: { status: 200, body: { truncated: false, tree: [] } },
+      ...repository('Big/small', { '.claude/skills/a/SKILL.md': skill('a') }),
+    }),
+  });
+  assert.equal(big.status, 200);
+  assert.deepEqual(big.body.repositories.map((group: { repository: { id: string } }) => group.repository.id), ['Big/small']);
+  assert.deepEqual(big.body.warnings, [
+    'Big/mono: the tree is too large to list at once; looked only in .agents/skills, .claude/skills, .github/skills, agent/skills ' +
+      '(scan it alone with GITHUB_TOKEN to search everywhere)',
+  ]);
+
+  const limited = await webScan('github.com/Acme', {
+    github: replay({
+      ...listing('Acme', [{ name: 'one' }, { name: 'two' }]),
+      ...repository('Acme/one', { '.claude/skills/a/SKILL.md': skill('a') }),
+      [`${API}/repos/Acme/two/commits/main`]: { status: 403, body: { message: 'API rate limit exceeded for user ID 1.' } },
+    }),
+  });
+  assert.deepEqual(limited, { status: 400, body: { error: 'GitHub rate limit reached; try again in a minute' } });
+
+  const unknown = await webScan('github.com/no-such-owner', {
+    github: replay({ [`${API}/users/no-such-owner/repos?per_page=100&page=1`]: { status: 404, body: { message: 'Not Found' } } }),
+  });
+  assert.deepEqual(unknown, { status: 400, body: { error: 'Organization or user not found: https://github.com/no-such-owner' } });
 });

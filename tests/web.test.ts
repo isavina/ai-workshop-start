@@ -40,11 +40,20 @@ test('the page: a field for a repository, the skills and the selected SKILL.md',
   assert.match(hint, /Paste a GitHub repository URL, such as <code>https:\/\/github\.com\/isavina\/ai-workshop-start<\/code>/);
   assert.match(hint, /<code>\/tree\/&lt;name or hash&gt;<\/code>/);
   assert.match(hint, /A directory on this machine/);
+  assert.match(hint, /An organization or a user, such as <code>https:\/\/github\.com\/JetBrains<\/code>, scans every repository; it needs <code>GITHUB_TOKEN<\/code>/);
+  // While it scans, the page says so; an owner's skills are grouped, and selected by owner/repo:path.
+  assert.match(page.text, /say\('Scanning ' \+ what/);
+  assert.match(page.text, /className: 'repository'/);
+  assert.match(page.text, /result\.owner \? \(skill\) => skill\.id : \(skill\) => skill\.path/);
   assert.match(page.text, /<ul id="skills">/);
   assert.match(page.text, /<article id="skill">/);
   // The address keeps the scan and the selected skill.
   assert.match(page.text, /query\.get\('repository'\)/);
   assert.match(page.text, /query\.get\('skill'\)/);
+  // The page's script, as served, is valid JavaScript: a template literal eats unescaped backslashes.
+  const script = /<script>([\s\S]*?)<\/script>/.exec(page.text)?.[1] ?? '';
+  assert.doesNotThrow(() => new Function(script));
+  assert.match(script, /const OWNER = \/\^\(\?:https\?:\\\/\\\/\)/);
   // The SKILL.md and the names are shown as text, never as HTML.
   assert.doesNotMatch(page.text, /innerHTML/);
 });
