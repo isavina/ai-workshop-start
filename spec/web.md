@@ -14,7 +14,7 @@ A **filter field** above the skills: the [same filter as `--filter`](cli.md#filt
 - *Instant*, on the scan already done: it never scans again
 - The total says `N of M skills`; on an organization `N of M skills in K repositories`, K those with a match;
   repositories without a match are not shown
-- The words matched are marked in the names and descriptions
+- The words matched are marked in the names and descriptions; of two words starting alike, the longer: `c code` marks `code`
 - The selected skill stays open while it matches; otherwise the first match is
 - No match → an empty list, `No skill matches "<words>"`, no SKILL.md; the field stays, to change it
 - The address keeps `&q=<words>`: a filtered view can be linked and reloaded; a new scan keeps the filter

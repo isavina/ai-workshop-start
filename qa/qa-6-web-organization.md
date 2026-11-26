@@ -2,7 +2,7 @@
 
 An organization or a user on the page ([spec/web.md](../spec/web.md#organization)).
 
-**Needs:** a browser, network; `GITHUB_TOKEN` for steps 2–4.
+**Needs:** a browser, network; `GITHUB_TOKEN` for steps 2–5.
 
 1. `./skill-atlas serve` without `GITHUB_TOKEN`; **(browser)** scan `https://github.com/Kotlin`
 
@@ -22,6 +22,12 @@ An organization or a user on the page ([spec/web.md](../spec/web.md#organization
    `<path>` too written `%2F`: `?repository=https%3A%2F%2Fgithub.com%2FKotlin&skill=Kotlin%2Fmultik%3A<path>`;
    a reload shows it again.
 
-4. **(browser)** Scan `https://github.com/Kotlin`, then at once `<root>/fixture`
+4. **(browser)** Type into the filter the same word as [QA-4](qa-4-organization.md) step 4
+
+   Expected, at once, without scanning again: `Kotlin · N of M skills in K repositories`, the same N and
+   K as QA-4 step 4; only the repositories with a match, each with the count of its matches; the word marked. A
+   reload keeps it (`&q=` in the address). `Escape` clears it: every repository again.
+
+5. **(browser)** Scan `https://github.com/Kotlin`, then at once `<root>/fixture`
 
    Expected: only the fixture's progress and result; the organization's never replaces it.

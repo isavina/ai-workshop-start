@@ -374,6 +374,10 @@ test('the page: the filter is instant, on the scan already done; N of M skills; 
   // The same filter as the CLI: separators, several words, all of them.
   page.filter('Code_Review');
   assert.deepEqual(shownNames(page.list), ['code-review']);
+  // A shorter word does not hide a longer one: `c code` marks `code`, not only its `c`.
+  page.filter('c code');
+  assert.deepEqual(shownNames(page.list), ['code-review']);
+  assert.deepEqual(page.list.querySelectorAll('mark').map((mark) => mark.textContent), ['code']);
   page.filter('review notes');
   assert.deepEqual(shownNames(page.list), ['release']);
 

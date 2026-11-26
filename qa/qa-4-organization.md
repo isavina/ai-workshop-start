@@ -27,6 +27,20 @@
 
    Expected: `<user> · 0 skills in 0 of 0 repositories`, or `… in 0 of R`; exit code 0.
 
-4. `GITHUB_TOKEN=bad ./skill-atlas scan github.com/Kotlin`
+4. `./skill-atlas scan github.com/Kotlin --filter <a word of one skill from step 1>`, such as the first word of its name
+
+   Expected, exit code 0:
+   ```
+   Kotlin · N of M skills in K of R repositories
+
+   Kotlin/<repo> · N of M skills
+   …
+   ```
+   - M and R as in step 1; only the matching skills, and only the K repositories with a match.
+   - Each repository's own `N of M skills`; their N add up to the total's.
+   - `--filter <words no skill has>` → the header, `… · 0 of M skills in 0 of R repositories`, then
+     `No skill matches "<words>"`; exit code 0.
+
+5. `GITHUB_TOKEN=bad ./skill-atlas scan github.com/Kotlin`
 
    Expected: `GitHub rejected the token in GITHUB_TOKEN`; exit code 1; no partial result on stdout.

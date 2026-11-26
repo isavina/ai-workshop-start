@@ -258,8 +258,10 @@ function words() {
 function marked(text) {
   const typed = words();
   if (!typed) return [text];
-  const escaped = typed.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean).map((word) => word.replace(/[.*+?^${'$'}{}()|[\]\\]/g, '\\$&'));
-  const pattern = new RegExp('(?<![\\p{L}\\p{N}])(?:' + escaped.join('|') + ')', 'giu');
+  // Only letters and digits are left, nothing to escape; the longest first, as an alternation takes
+  // the first that matches: "c code" marks "code", not only its "c".
+  const typedWords = typed.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean).sort((a, b) => b.length - a.length);
+  const pattern = new RegExp('(?<![\\p{L}\\p{N}])(?:' + typedWords.join('|') + ')', 'giu');
   const parts = [];
   let last = 0;
   for (const match of text.matchAll(pattern)) {

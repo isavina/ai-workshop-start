@@ -9,12 +9,12 @@ what you see with **Expected**. A step that differs is a failure; write down wha
 
 | Script | What it covers | Needs |
 | --- | --- | --- |
-| [QA-1 Local directory](qa-1-local-directory.md) | `scan <directory>`: what is a skill, copies, warnings | — |
+| [QA-1 Local directory](qa-1-local-directory.md) | `scan <directory>`: what is a skill, copies, warnings, `--filter` | — |
 | [QA-2 GitHub repository](qa-2-github-repository.md) | `scan <GitHub URL>`: default branch, a commit, links, speed | network |
 | [QA-3 Errors](qa-3-errors.md) | clear messages, exit code 1, rate limit, token | network |
-| [QA-4 Organization](qa-4-organization.md) | `scan github.com/<owner>` | network, `GITHUB_TOKEN` |
-| [QA-5 Web view](qa-5-web-view.md) | `serve`: the page, a scan, a skill, the address | browser |
-| [QA-6 Web view, organization](qa-6-web-organization.md) | an owner on the page | browser, `GITHUB_TOKEN` |
+| [QA-4 Organization](qa-4-organization.md) | `scan github.com/<owner>`, filtered too | network, `GITHUB_TOKEN` |
+| [QA-5 Web view](qa-5-web-view.md) | `serve`: the page, a scan, a skill, the address, the filter, the look | browser |
+| [QA-6 Web view, organization](qa-6-web-organization.md) | an owner on the page, filtered too | browser, `GITHUB_TOKEN` |
 
 ## Before you start
 
