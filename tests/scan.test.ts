@@ -158,3 +158,34 @@ test('rate limit → a message that asks for GITHUB_TOKEN', async () => {
     message: 'GitHub rate limit reached; set GITHUB_TOKEN',
   });
 });
+
+test('a branch, tag or commit: /tree/<ref> is resolved to the commit the links pin; an unknown one → a clear message', async () => {
+  const github = replay({
+    'https://api.github.com/repos/JetBrains/example': { status: 200, body: { full_name: 'JetBrains/example', default_branch: 'main' } },
+    'https://api.github.com/repos/JetBrains/example/commits/release/1.0': { status: 200, body: { sha: EXAMPLE_COMMIT } },
+    [`https://api.github.com/repos/JetBrains/example/git/trees/${EXAMPLE_COMMIT}?recursive=1`]: {
+      status: 200,
+      body: { truncated: false, tree: [{ path: '.claude/skills/commits/SKILL.md', mode: '100644', type: 'blob' }] },
+    },
+    [`https://raw.githubusercontent.com/JetBrains/example/${EXAMPLE_COMMIT}/.claude/skills/commits/SKILL.md`]: {
+      status: 200,
+      body: '---\nname: commits\ndescription: Write commit messages.\n---\n',
+    },
+    'https://api.github.com/repos/JetBrains/example/commits/no-such-branch': { status: 404, body: { message: 'Not Found' } },
+  });
+  // With a token: code search sees only the default branch, so the tree is listed.
+  const release = await atlas(['scan', 'https://github.com/JetBrains/example/tree/release/1.0/'], { github });
+  assert.equal(release.code, 0, release.stderr);
+  assert.equal(
+    release.stdout,
+    [
+      'JetBrains/example · 1 skill',
+      'commits — Write commit messages.',
+      `  https://github.com/JetBrains/example/blob/${EXAMPLE_COMMIT}/.claude/skills/commits/SKILL.md`,
+    ].join('\n'),
+  );
+
+  const unknown = await atlas(['scan', 'github.com/JetBrains/example/tree/no-such-branch'], { github });
+  assert.equal(unknown.code, 1);
+  assert.equal(unknown.stderr, 'Branch, tag or commit not found in https://github.com/JetBrains/example: no-such-branch');
+});

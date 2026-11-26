@@ -13,7 +13,14 @@ build-tools-bump-gradle-api — Bumps the Gradle API version that Kotlin Gradle 
 …
 ```
 
-Set `GITHUB_TOKEN` for a higher GitHub rate limit. `npm test` runs the tests.
+Scan a branch, tag or commit with `…/tree/<ref>`. Set `GITHUB_TOKEN` for a higher GitHub rate limit.
+
+`npm test` runs the tests, offline: the end-to-end ones replay what GitHub answered for real repositories at
+fixed commits, in [tests/recordings/](tests/recordings/). To add or refresh one:
+
+```console
+$ GITHUB_TOKEN=$(gh auth token) npm run record -- github.com/JetBrains/MPS/tree/<full commit hash>
+```
 
 - [spec/](spec/): what it does. [AGENTS.md](AGENTS.md): the definition of done.
 - [fixture/](fixture/README.md): a small repository for the tests.

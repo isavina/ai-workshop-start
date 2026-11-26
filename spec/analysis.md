@@ -1,6 +1,7 @@
 # Repository analysis
 ## Input
 A **GitHub repository** URL, or a local directory
+- At the default branch, or at `/tree/<branch, tag or commit>`: everything after `tree/`
 ## Output
 Every `SKILL.md`: **name**, **description**, **link**
 ## Architecture
@@ -11,7 +12,9 @@ Skill: id = `repo:path`, name, description, commit
 - The name: front matter, else the directory
 - The link pins the *scanned commit*
 - Malformed front matter → a *warning*, the scan goes on
-- Unreachable repository → a clear message, exit code 1
+- Unreachable repository, or an unknown branch, tag or commit → a clear message, exit code 1
+- Code search (with `GITHUB_TOKEN`) only on the default branch; elsewhere, the tree
+- A tree too large for one answer → only the skill roots at the repository root, and a *warning*
 ## Project skill
 A skill that agents working *in the repository* load: `<base>/<root>/<skill>/SKILL.md`
 - **root**: `.agents/skills`, `.claude/skills`, `.github/skills`, `agent/skills`
