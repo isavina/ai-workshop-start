@@ -37,3 +37,8 @@ export async function atlas(args: string[], { github = replay(EXAMPLE), token = 
   });
   return { code, stdout: stdout.join('\n'), stderr: stderr.join('\n') };
 }
+
+/** What a terminal shows for `skill-atlas … 2>&1`: the output, then the warnings. */
+export function printed({ stdout, stderr }: { stdout: string; stderr: string }): string {
+  return [stdout, stderr].filter(Boolean).map((text) => `${text}\n`).join('');
+}
