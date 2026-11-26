@@ -30,6 +30,9 @@ $ ./skill-atlas scan ~/projects/my-repository                       # a local ch
 - GitHub allows 60 requests an hour without a token. Set `GITHUB_TOKEN` for more, for example
   `GITHUB_TOKEN=$(gh auth token) ./skill-atlas scan …`.
 
+Or in the browser: `./skill-atlas serve` opens a local web view at http://localhost:4173, with a field
+for a repository, its skills and each one's SKILL.md ([spec/web.md](spec/web.md)).
+
 ## What counts as a skill
 
 A project skill is `<root>/<skill>/SKILL.md`, where the root is `.agents/skills`, `.claude/skills`,
