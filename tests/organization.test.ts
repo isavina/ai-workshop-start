@@ -210,7 +210,7 @@ test('the web view: an organization without GITHUB_TOKEN → a clear message, st
   });
 });
 
-test('the web view: a tree too large is a warning; the rate limit or an unknown owner → status 400, no partial result', async () => {
+test('the web view: a tree too large is a warning; the rate limit, unreachable GitHub, a rejected token or an unknown owner → status 400, no partial result', async () => {
   const big = await webScan('github.com/Big', {
     github: replay({
       ...listing('Big', [{ name: 'mono' }, { name: 'small' }]),
@@ -240,4 +240,16 @@ test('the web view: a tree too large is a warning; the rate limit or an unknown 
     github: replay({ [`${API}/users/no-such-owner/repos?per_page=100&page=1`]: { status: 404, body: { message: 'Not Found' } } }),
   });
   assert.deepEqual(unknown, { status: 400, body: { error: 'Organization or user not found: https://github.com/no-such-owner' } });
+
+  // Nothing recorded: GitHub cannot be reached.
+  const unreachable = await webScan('github.com/Acme', { github: replay({}) });
+  assert.deepEqual(unreachable, {
+    status: 400,
+    body: { error: `Cannot reach GitHub: not recorded: ${API}/users/Acme/repos?per_page=100&page=1` },
+  });
+
+  const rejected = await webScan('github.com/Acme', {
+    github: replay({ [`${API}/users/Acme/repos?per_page=100&page=1`]: { status: 401, body: { message: 'Bad credentials' } } }),
+  });
+  assert.deepEqual(rejected, { status: 400, body: { error: 'GitHub rejected the token in GITHUB_TOKEN' } });
 });

@@ -169,27 +169,33 @@ function count(n, one, many) {
 /** github.com/<owner>, as the server reads it: every repository, which takes a while. */
 const OWNER = /^(?:https?:\\/\\/)?(?:www\\.)?github\\.com\\/[\\w-]+\\/?$/i;
 
+/** Counts the scans: only the latest one may show its progress and result, and enable the button. */
+let loading = 0;
+
 async function load(repository, selected) {
+  const mine = ++loading;
   field.value = repository;
   form.querySelector('button').disabled = true;
   const what = OWNER.test(repository) ? 'every repository of ' + repository : repository;
   const started = Date.now();
-  const scanning = () => say('Scanning ' + what + '… ' + Math.round((Date.now() - started) / 1000) + ' s');
-  scanning();
+  const scanning = () => mine === loading
+    ? say('Scanning ' + what + '… ' + Math.round((Date.now() - started) / 1000) + ' s')
+    : clearInterval(timer);
   const timer = setInterval(scanning, 1000);
+  scanning();
   warnings.replaceChildren();
   main.hidden = true;
   try {
     const response = await fetch('/api/scan?repository=' + encodeURIComponent(repository));
     const result = await response.json();
-    clearInterval(timer);
+    if (mine !== loading) return;
     if (!response.ok) return say(result.error, true);
     show(repository, result, selected);
   } catch (error) {
-    clearInterval(timer);
-    say('Cannot reach the Skill Atlas server: ' + error.message, true);
+    if (mine === loading) say('Cannot reach the Skill Atlas server: ' + error.message, true);
   } finally {
-    form.querySelector('button').disabled = false;
+    clearInterval(timer);
+    if (mine === loading) form.querySelector('button').disabled = false;
   }
 }
 
