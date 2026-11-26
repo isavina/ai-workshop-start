@@ -142,6 +142,15 @@ test('unreachable repository → a clear message, exit code 1', async () => {
     message: 'Repository not found: https://github.com/JetBrains/no-such-repository',
   });
 
+  // What GitHub answers for a repository without a commit.
+  const empty = replay({
+    'https://api.github.com/repos/JetBrains/empty': { status: 200, body: { full_name: 'JetBrains/empty', default_branch: 'main' } },
+    'https://api.github.com/repos/JetBrains/empty/commits/main': { status: 409, body: { message: 'Git Repository is empty.' } },
+  });
+  const emptied = await atlas(['scan', 'github.com/JetBrains/empty'], { github: empty });
+  assert.equal(emptied.code, 1);
+  assert.equal(emptied.stderr, 'Repository is empty: https://github.com/JetBrains/empty');
+
   const offline = await atlas(['scan', 'https://github.com/JetBrains/not-answered']);
   assert.equal(offline.code, 1);
   assert.match(offline.stderr, /^Cannot reach GitHub: not recorded: https:\/\/api\.github\.com\/repos\/JetBrains\/not-answered$/);

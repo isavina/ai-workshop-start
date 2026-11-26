@@ -1,7 +1,7 @@
 // Runs the commands the way the CLI does, with GitHub answering from EXAMPLE below.
 import { fileURLToPath } from 'node:url';
 import { run } from '../src/commands.ts';
-import { openGitHub, parseGitHubUrl, type Fetch } from '../src/core/github.ts';
+import { openGitHub, openOwner, parseGitHubOwner, parseGitHubUrl, type Fetch } from '../src/core/github.ts';
 import { replay, type Recording } from '../src/core/replay.ts';
 import { openDirectory } from '../src/local.ts';
 
@@ -28,7 +28,10 @@ const EXAMPLE: Recording = {
 /** What the CLI opens for an input, with GitHub answering from EXAMPLE, or from `github`. */
 export function opener({ github = replay(EXAMPLE), token = 'test' } = {}) {
   // With a token, through code search, as EXAMPLE answers it; without one, through the tree.
-  return (input: string) => (parseGitHubUrl(input) ? openGitHub(input, { fetch: github, token }) : openDirectory(input));
+  return (input: string) =>
+    parseGitHubUrl(input) ? openGitHub(input, { fetch: github, token })
+    : parseGitHubOwner(input) ? openOwner(input, { fetch: github, token })
+    : openDirectory(input);
 }
 
 /** `skill-atlas <args>`, as the CLI runs it, with GitHub answering from EXAMPLE, or from `github`. */

@@ -5,6 +5,7 @@
 ## Page
 - A **field** for a repository: what `scan` takes, a GitHub URL, `…/tree/<ref>` or a directory
 - Under it, a **hint** on what to paste there, with an example
+- An organization or a user → a clear message: one repository at a time; the CLI scans an organization
 - Its **skills**: the same scan, the same order; name, *full* description, path
 - The selected skill's **SKILL.md**: as it is, front matter included; its link, `also in`
 - Warnings and errors: the same messages as the CLI, on the page

@@ -3,11 +3,11 @@
 import { createServer, type Server } from 'node:http';
 import { AtlasError } from './core/errors.ts';
 import { skillLink } from './core/model.ts';
-import { scan, type Source } from './core/scan.ts';
+import { isOwner, scan, type Owner, type Source } from './core/scan.ts';
 
 export type WebOptions = {
   /** Opens what the user typed into the field, as `scan` does. */
-  open(input: string): Promise<Source>;
+  open(input: string): Promise<Source | Owner>;
 };
 
 /**
@@ -30,7 +30,11 @@ export function createWebServer({ open }: WebOptions): Server {
     const input = url.searchParams.get('repository')?.trim();
     if (!input) return json(400, { error: 'Type a GitHub URL or a directory' });
     try {
-      const result = await scan(await open(input));
+      const opened = await open(input);
+      if (isOwner(opened)) {
+        throw new AtlasError(`One repository at a time: ${opened.url} is an organization or a user; skill-atlas scan ${opened.url} scans all of its repositories`);
+      }
+      const result = await scan(opened);
       const { id, url: repositoryUrl, commit } = result.repository;
       json(200, {
         repository: { id, url: repositoryUrl, commit },

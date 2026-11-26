@@ -1,6 +1,6 @@
-import { AtlasError } from './errors.ts';
+import { AtlasError, EmptyRepositoryError, NotFoundError } from './errors.ts';
 import { SKILL_ROOTS } from './find.ts';
-import type { Source } from './scan.ts';
+import type { Owner, Source } from './scan.ts';
 
 /** The part of `fetch` the core uses, so tests and the browser can pass their own. */
 export type Fetch = (url: string, init?: { headers?: Record<string, string> }) => Promise<Response>;
@@ -26,24 +26,73 @@ export function parseGitHubUrl(input: string): { owner: string; repo: string; re
   return match ? { owner: match[1], repo: match[2], ref: match[3] } : undefined;
 }
 
+/**
+ * `https://github.com/owner`, with or without the scheme or a trailing slash: an organization or a
+ * user, all of whose repositories are scanned.
+ */
+export function parseGitHubOwner(input: string): string | undefined {
+  return /^(?:https?:\/\/)?(?:www\.)?github\.com\/([\w-]+)\/?$/i.exec(input.trim())?.[1];
+}
+
 /** Resolves the ref, or the default branch, to a commit and lists the files that may be skills. */
 export async function openGitHub(input: string, options: GitHubOptions): Promise<Source> {
   const name = parseGitHubUrl(input);
   if (!name) throw new AtlasError(`Not a GitHub repository URL: ${input}`);
   const github = client(options);
-  const info = await github.json<{ full_name: string; default_branch: string }>(
+  const info = await github.json<RepositoryInfo>(
     `${API}/repos/${name.owner}/${name.repo}`,
     `Repository not found: https://github.com/${name.owner}/${name.repo}`,
   );
-  const id = info.full_name;
   const ref = name.ref ?? info.default_branch;
+  const search = Boolean(options.token) && ref === info.default_branch;
+  return openRepository(github, info, ref, search ? 'search' : 'tree');
+}
+
+/**
+ * Every public repository of an organization or a user but forks and archived ones, sorted by
+ * `owner/repo`; each one opens at its default branch, through its tree: code search allows only
+ * 10 requests a minute.
+ */
+export async function openOwner(input: string, options: GitHubOptions): Promise<Owner> {
+  const login = parseGitHubOwner(input);
+  if (!login) throw new AtlasError(`Not a GitHub organization or user URL: ${input}`);
+  const github = client(options);
+  const byId = new Map<string, RepositoryInfo>();
+  return {
+    url: `https://github.com/${login}`,
+    async list() {
+      const listed: (RepositoryInfo & { fork: boolean; archived: boolean; owner: { login: string } })[] = [];
+      for (let page = 1; ; page++) {
+        const answer = await github.json<typeof listed>(
+          `${API}/users/${login}/repos?per_page=100&page=${page}`,
+          `Organization or user not found: https://github.com/${login}`,
+        );
+        listed.push(...answer);
+        if (answer.length < 100) break;
+      }
+      for (const info of listed) if (!info.fork && !info.archived) byId.set(info.full_name, info);
+      const repositories = [...byId.keys()].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+      return { owner: listed[0]?.owner.login ?? login, repositories };
+    },
+    open: (id) => openRepository(github, byId.get(id)!, byId.get(id)!.default_branch, 'tree, alone'),
+  };
+}
+
+type RepositoryInfo = { full_name: string; default_branch: string };
+
+/**
+ * One repository at a ref: through code search, through the tree, or through the tree as part of
+ * an organization, where a repository is better scanned alone when its tree is too large.
+ */
+async function openRepository(github: Client, info: RepositoryInfo, ref: string, how: 'search' | 'tree' | 'tree, alone'): Promise<Source> {
+  const id = info.full_name;
   const { sha } = await github.json<{ sha: string }>(
     `${API}/repos/${id}/commits/${encodePath(ref)}`,
     `Branch, tag or commit not found in https://github.com/${id}: ${ref}`,
   );
   const warnings: string[] = [];
-  const search = options.token && ref === info.default_branch;
-  const paths = search ? await searchPaths(github, id) : await treePaths(github, id, sha, warnings);
+  const hint = how === 'tree' ? 'GITHUB_TOKEN searches everywhere on the default branch' : 'scan it alone with GITHUB_TOKEN to search everywhere';
+  const paths = how === 'search' ? await searchPaths(github, id) : await treePaths(github, id, sha, warnings, hint);
   const [organization, repo] = id.split('/');
   return {
     repository: { id, organization, name: repo, url: `https://github.com/${id}`, commit: sha },
@@ -70,10 +119,10 @@ async function searchPaths(github: Client, id: string): Promise<string[]> {
 type Tree = { truncated: boolean; tree: { path: string; mode: string; type: string; sha: string }[] };
 
 /** The whole tree at once, or only the skill roots when it is too large for one answer. */
-async function treePaths(github: Client, id: string, sha: string, warnings: string[]): Promise<string[]> {
+async function treePaths(github: Client, id: string, sha: string, warnings: string[], hint: string): Promise<string[]> {
   const tree = await github.json<Tree>(`${API}/repos/${id}/git/trees/${sha}?recursive=1`);
   if (!tree.truncated) return files(tree);
-  warnings.push(`the tree is too large to list at once; looked only in ${SKILL_ROOTS.join(', ')} (GITHUB_TOKEN searches everywhere on the default branch)`);
+  warnings.push(`the tree is too large to list at once; looked only in ${SKILL_ROOTS.join(', ')} (${hint})`);
   const paths: string[] = [];
   for (const root of SKILL_ROOTS) {
     const rootSha = await directory(github, id, sha, root);
@@ -122,8 +171,11 @@ function client({ fetch, token }: GitHubOptions) {
     const body: unknown = await response.json().catch(() => undefined);
     const message = (body as { message?: unknown } | undefined)?.message;
     const text = typeof message === 'string' ? message : '';
-    // 422: a commit hash that is not in the repository.
-    if (response.status === 404 || response.status === 422) throw new AtlasError(notFound);
+    // 422: a commit hash that is not in the repository. 409: a repository without a commit.
+    if (response.status === 404 || response.status === 422) throw new NotFoundError(notFound);
+    if (response.status === 409 && /empty/i.test(text)) {
+      throw new EmptyRepositoryError(`Repository is empty: https://github.com/${/\/repos\/([^/]+\/[^/]+)/.exec(url)?.[1] ?? url}`);
+    }
     if ((response.status === 403 || response.status === 429) && /rate limit/i.test(text)) {
       throw new AtlasError(`GitHub rate limit reached; ${token ? 'try again in a minute' : 'set GITHUB_TOKEN'}`);
     }
