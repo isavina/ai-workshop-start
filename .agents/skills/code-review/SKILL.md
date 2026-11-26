@@ -68,3 +68,15 @@ A failing test or type error is the first finding. The tests never reach the net
 Findings first, the most severe first. Each one: `file:line`, what is wrong, and the input that shows it
 (a repository, a path, a command and what it prints). Then what was run and its result. No finding →
 say so, and what was checked.
+
+## Label the pull request
+
+Reviewing a pull request, and leaving at least one finding to address → label it `review-suggested`,
+so it shows that the author has work to do. No finding → no label.
+
+```console
+$ gh label create review-suggested --color FBCA04 --description "A review left suggestions to address" --force
+$ gh pr edit <number> --add-label review-suggested
+```
+
+The author removes it with [address-review](../address-review/SKILL.md) once every point is answered.
