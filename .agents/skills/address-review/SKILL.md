@@ -12,15 +12,21 @@ Every comment gets an answer: a fix, or a reason why not. Never resolve a thread
 ```console
 $ gh pr view <number> --json title,headRefName,baseRefName,mergeable,url
 $ gh pr view <number> --json reviews,comments
-$ gh api repos/<owner>/<repo>/pulls/<number>/comments --jq '.[] | {id, path, line, user: .user.login, body}'
+$ gh api --paginate repos/<owner>/<repo>/pulls/<number>/comments --jq '.[] | {id, in_reply_to_id, path, line, user: .user.login, body}'
 ```
+
+`--paginate`: without it only the first page (30) comes back, replies included. A comment with
+`in_reply_to_id` is a reply in an existing thread; the others are the ones to answer.
 
 Then check out the pull request's branch and compare it with the remote:
 
 ```console
 $ git fetch origin && git switch <headRefName>
+$ git merge --ff-only origin/<headRefName>         # catch up if the local branch is behind
 $ git log --oneline origin/<headRefName>..HEAD    # local commits a push would add too
 ```
+
+If the fast-forward fails, the local and remote branches have diverged: stop and report it.
 
 ## 2. Check each comment
 
