@@ -7,20 +7,26 @@ export type Fetch = (url: string, init?: { headers?: Record<string, string> }) =
 
 export type GitHubOptions = {
   fetch: Fetch;
-  /** With a token, skills are found through code search; without it, through the tree. */
+  /**
+   * With a token, skills on the default branch are found through code search; without it, or at
+   * another branch, tag or commit, through the tree: code search sees only the default branch.
+   */
   token?: string;
 };
 
 const API = 'https://api.github.com';
 const RAW = 'https://raw.githubusercontent.com';
 
-/** `https://github.com/owner/repo`, with or without the scheme, a trailing slash or `.git`. */
-export function parseGitHubUrl(input: string): { owner: string; repo: string } | undefined {
-  const match = /^(?:https?:\/\/)?(?:www\.)?github\.com\/([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/i.exec(input.trim());
-  return match ? { owner: match[1], repo: match[2] } : undefined;
+/**
+ * `https://github.com/owner/repo`, with or without the scheme, a trailing slash or `.git`; or
+ * `…/tree/<ref>`, where everything after `tree/` is the branch, tag or commit.
+ */
+export function parseGitHubUrl(input: string): { owner: string; repo: string; ref?: string } | undefined {
+  const match = /^(?:https?:\/\/)?(?:www\.)?github\.com\/([\w.-]+)\/([\w.-]+?)(?:\.git)?(?:\/tree\/(.+?))?\/?$/i.exec(input.trim());
+  return match ? { owner: match[1], repo: match[2], ref: match[3] } : undefined;
 }
 
-/** Resolves the default branch to a commit and lists the files that may be skills. */
+/** Resolves the ref, or the default branch, to a commit and lists the files that may be skills. */
 export async function openGitHub(input: string, options: GitHubOptions): Promise<Source> {
   const name = parseGitHubUrl(input);
   if (!name) throw new AtlasError(`Not a GitHub repository URL: ${input}`);
@@ -30,9 +36,14 @@ export async function openGitHub(input: string, options: GitHubOptions): Promise
     `Repository not found: https://github.com/${name.owner}/${name.repo}`,
   );
   const id = info.full_name;
-  const { sha } = await github.json<{ sha: string }>(`${API}/repos/${id}/commits/${encodePath(info.default_branch)}`);
+  const ref = name.ref ?? info.default_branch;
+  const { sha } = await github.json<{ sha: string }>(
+    `${API}/repos/${id}/commits/${encodePath(ref)}`,
+    `Branch, tag or commit not found in https://github.com/${id}: ${ref}`,
+  );
   const warnings: string[] = [];
-  const paths = options.token ? await searchPaths(github, id) : await treePaths(github, id, sha, warnings);
+  const search = options.token && ref === info.default_branch;
+  const paths = search ? await searchPaths(github, id) : await treePaths(github, id, sha, warnings);
   const [organization, repo] = id.split('/');
   return {
     repository: { id, organization, name: repo, url: `https://github.com/${id}`, commit: sha },
@@ -62,7 +73,7 @@ type Tree = { truncated: boolean; tree: { path: string; mode: string; type: stri
 async function treePaths(github: Client, id: string, sha: string, warnings: string[]): Promise<string[]> {
   const tree = await github.json<Tree>(`${API}/repos/${id}/git/trees/${sha}?recursive=1`);
   if (!tree.truncated) return files(tree);
-  warnings.push(`the tree is too large to list at once; looked only in ${SKILL_ROOTS.join(', ')} (GITHUB_TOKEN searches everywhere)`);
+  warnings.push(`the tree is too large to list at once; looked only in ${SKILL_ROOTS.join(', ')} (GITHUB_TOKEN searches everywhere on the default branch)`);
   const paths: string[] = [];
   for (const root of SKILL_ROOTS) {
     const rootSha = await directory(github, id, sha, root);
@@ -111,7 +122,8 @@ function client({ fetch, token }: GitHubOptions) {
     const body: unknown = await response.json().catch(() => undefined);
     const message = (body as { message?: unknown } | undefined)?.message;
     const text = typeof message === 'string' ? message : '';
-    if (response.status === 404) throw new AtlasError(notFound);
+    // 422: a commit hash that is not in the repository.
+    if (response.status === 404 || response.status === 422) throw new AtlasError(notFound);
     if ((response.status === 403 || response.status === 429) && /rate limit/i.test(text)) {
       throw new AtlasError(`GitHub rate limit reached; ${token ? 'try again in a minute' : 'set GITHUB_TOKEN'}`);
     }

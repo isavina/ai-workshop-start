@@ -25,17 +25,20 @@ const EXAMPLE: Recording = {
   },
 };
 
-const github = replay(EXAMPLE);
-
-/** `skill-atlas <args>`, as the CLI runs it, with GitHub answering from EXAMPLE. */
-export async function atlas(args: string[]) {
+/** `skill-atlas <args>`, as the CLI runs it, with GitHub answering from EXAMPLE, or from `github`. */
+export async function atlas(args: string[], { github = replay(EXAMPLE), token = 'test' } = {}) {
   const stdout: string[] = [];
   const stderr: string[] = [];
   const code = await run(args, {
-    // With a token, through code search, as EXAMPLE answers it.
-    open: (input) => (parseGitHubUrl(input) ? openGitHub(input, { fetch: github, token: 'test' }) : openDirectory(input)),
+    // With a token, through code search, as EXAMPLE answers it; without one, through the tree.
+    open: (input) => (parseGitHubUrl(input) ? openGitHub(input, { fetch: github, token }) : openDirectory(input)),
     print: (text) => stdout.push(text),
     error: (text) => stderr.push(text),
   });
   return { code, stdout: stdout.join('\n'), stderr: stderr.join('\n') };
+}
+
+/** What a terminal shows for `skill-atlas … 2>&1`: the output, then the warnings. */
+export function printed({ stdout, stderr }: { stdout: string; stderr: string }): string {
+  return [stdout, stderr].filter(Boolean).map((text) => `${text}\n`).join('');
 }
