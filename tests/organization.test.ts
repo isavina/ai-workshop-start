@@ -1,0 +1,167 @@
+// The decisions on an organization or a user in spec/analysis.md, spec/cli.md and spec/web.md,
+// checked on what the command prints for a small organization, JetBrains-like, answered below.
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { replay, type Recording } from '../src/core/replay.ts';
+import { createWebServer, listen } from '../src/web.ts';
+import { atlas, EXAMPLE_COMMIT, opener } from './helpers.ts';
+
+const API = 'https://api.github.com';
+const RAW = 'https://raw.githubusercontent.com';
+
+type Listed = { name: string; fork?: boolean; archived?: boolean; branch?: string };
+
+/** What GitHub lists for `/users/<owner>/repos`, a page of 100 at a time. */
+function listing(owner: string, repositories: Listed[]): Recording {
+  const recording: Recording = {};
+  for (let page = 1; page === 1 || (page - 1) * 100 <= repositories.length; page++) {
+    recording[`${API}/users/${owner}/repos?per_page=100&page=${page}`] = {
+      status: 200,
+      body: repositories.slice((page - 1) * 100, page * 100).map(({ name, fork = false, archived = false, branch = 'main' }) => ({
+        full_name: `${owner}/${name}`,
+        default_branch: branch,
+        fork,
+        archived,
+        owner: { login: owner },
+      })),
+    };
+  }
+  return recording;
+}
+
+/** A repository at EXAMPLE_COMMIT whose tree holds these files, each SKILL.md with its text. */
+function repository(id: string, files: Record<string, string>, branch = 'main'): Recording {
+  const recording: Recording = {
+    [`${API}/repos/${id}/commits/${branch}`]: { status: 200, body: { sha: EXAMPLE_COMMIT } },
+    [`${API}/repos/${id}/git/trees/${EXAMPLE_COMMIT}?recursive=1`]: {
+      status: 200,
+      body: { truncated: false, tree: Object.keys(files).map((path) => ({ path, mode: '100644', type: 'blob' })) },
+    },
+  };
+  for (const [path, text] of Object.entries(files)) recording[`${RAW}/${id}/${EXAMPLE_COMMIT}/${path}`] = { status: 200, body: text };
+  return recording;
+}
+
+const skill = (name: string) => `---\nname: ${name}\ndescription: The ${name} skill. More.\n---\n`;
+const blob = (id: string, path: string) => `  https://github.com/${id}/blob/${EXAMPLE_COMMIT}/${path}`;
+
+// 120 forks first: the listing takes two pages, and none of them is ever opened.
+const forks: Listed[] = Array.from({ length: 120 }, (_, i) => ({ name: `fork-${i}`, fork: true }));
+const ACME: Recording = {
+  ...listing('Acme', [
+    ...forks,
+    { name: 'zeta' },
+    { name: 'Alpha', branch: 'develop' },
+    { name: 'no-skills' },
+    { name: 'empty' },
+    { name: 'gone' },
+    { name: 'old', archived: true },
+    { name: 'broken' },
+  ]),
+  ...repository('Acme/zeta', { '.claude/skills/deploy/SKILL.md': skill('deploy'), '.github/skills/deploy/SKILL.md': skill('deploy') }),
+  ...repository('Acme/Alpha', { '.agents/skills/review/SKILL.md': skill('review'), 'web/.claude/skills/build/SKILL.md': skill('build') }, 'develop'),
+  ...repository('Acme/no-skills', { 'README.md': '# No skills', 'docs/skills/example/SKILL.md': skill('example') }),
+  ...repository('Acme/broken', { '.claude/skills/plain/SKILL.md': '# No front matter\n' }),
+  // What GitHub answers for a repository without a commit, and for one deleted after the listing.
+  [`${API}/repos/Acme/empty/commits/main`]: { status: 409, body: { message: 'Git Repository is empty.' } },
+  [`${API}/repos/Acme/gone/commits/main`]: { status: 404, body: { message: 'Not Found' } },
+};
+
+test('an organization: the total, then each repository with skills, by owner/repo; forks, archived and empty ones left out', async () => {
+  // With a token, and still through each tree: no code search is recorded.
+  const acme = await atlas(['scan', 'https://github.com/Acme/'], { github: replay(ACME) });
+  assert.equal(acme.code, 0, acme.stderr);
+  assert.equal(
+    acme.stdout,
+    [
+      'Acme · 4 skills in 3 of 6 repositories',
+      '',
+      'Acme/Alpha · 2 skills',
+      'build — The build skill.',
+      blob('Acme/Alpha', 'web/.claude/skills/build/SKILL.md'),
+      'review — The review skill.',
+      blob('Acme/Alpha', '.agents/skills/review/SKILL.md'),
+      '',
+      'Acme/broken · 1 skill',
+      'plain',
+      blob('Acme/broken', '.claude/skills/plain/SKILL.md'),
+      '',
+      'Acme/zeta · 1 skill',
+      'deploy — The deploy skill.',
+      blob('Acme/zeta', '.claude/skills/deploy/SKILL.md'),
+      '  also in .github/skills/deploy/SKILL.md',
+    ].join('\n'),
+  );
+  // A repository that fails is a warning; each warning starts with its repository.
+  assert.equal(
+    acme.stderr,
+    [
+      'warning: Acme/broken: .claude/skills/plain/SKILL.md: no front matter; using the directory name',
+      'warning: Acme/gone: Branch, tag or commit not found in https://github.com/Acme/gone: main; skipped',
+    ].join('\n'),
+  );
+});
+
+test('a user, without GITHUB_TOKEN: github.com/<owner> lists the same way', async () => {
+  const github = replay({ ...listing('someone', [{ name: 'notes' }]), ...repository('someone/notes', { '.claude/skills/todo/SKILL.md': skill('todo') }) });
+  const user = await atlas(['scan', 'github.com/someone'], { github, token: '' });
+  assert.equal(user.code, 0, user.stderr);
+  assert.equal(
+    user.stdout,
+    ['someone · 1 skill in 1 of 1 repository', '', 'someone/notes · 1 skill', 'todo — The todo skill.', blob('someone/notes', '.claude/skills/todo/SKILL.md')].join('\n'),
+  );
+  assert.equal(user.stderr, '');
+
+  const nothing = await atlas(['scan', 'github.com/nobody-home'], { github: replay(listing('nobody-home', [])) });
+  assert.equal(nothing.code, 0, nothing.stderr);
+  assert.equal(nothing.stdout, 'nobody-home · 0 skills in 0 of 0 repositories');
+});
+
+test('a tree too large for one answer: only the skill roots, and a warning to scan the repository alone', async () => {
+  const github = replay({
+    ...listing('Big', [{ name: 'mono' }]),
+    [`${API}/repos/Big/mono/commits/main`]: { status: 200, body: { sha: EXAMPLE_COMMIT } },
+    [`${API}/repos/Big/mono/git/trees/${EXAMPLE_COMMIT}?recursive=1`]: { status: 200, body: { truncated: true, tree: [] } },
+    [`${API}/repos/Big/mono/git/trees/${EXAMPLE_COMMIT}`]: { status: 200, body: { truncated: false, tree: [] } },
+  });
+  const big = await atlas(['scan', 'github.com/Big'], { github });
+  assert.equal(big.code, 0, big.stderr);
+  assert.equal(big.stdout, 'Big · 0 skills in 0 of 1 repository');
+  assert.equal(
+    big.stderr,
+    'warning: Big/mono: the tree is too large to list at once; looked only in .agents/skills, .claude/skills, .github/skills, agent/skills ' +
+      '(scan it alone with GITHUB_TOKEN to search everywhere)',
+  );
+});
+
+test('rate limit during the scan → a clear message, exit code 1, no partial result', async () => {
+  const github = replay({
+    ...listing('Acme', [{ name: 'one' }, { name: 'two' }]),
+    ...repository('Acme/one', { '.claude/skills/a/SKILL.md': skill('a') }),
+    [`${API}/repos/Acme/two/commits/main`]: { status: 403, body: { message: 'API rate limit exceeded for user ID 1.' } },
+  });
+  const limited = await atlas(['scan', 'github.com/Acme'], { github });
+  assert.equal(limited.code, 1);
+  assert.equal(limited.stdout, '');
+  assert.equal(limited.stderr, 'GitHub rate limit reached; try again in a minute');
+});
+
+test('an unknown organization or user → a clear message, exit code 1', async () => {
+  const github = replay({ [`${API}/users/no-such-owner/repos?per_page=100&page=1`]: { status: 404, body: { message: 'Not Found' } } });
+  const unknown = await atlas(['scan', 'github.com/no-such-owner'], { github });
+  assert.equal(unknown.code, 1);
+  assert.equal(unknown.stdout, '');
+  assert.equal(unknown.stderr, 'Organization or user not found: https://github.com/no-such-owner');
+});
+
+test('the web view: an organization → a clear message with status 400, and nothing asked of GitHub', async (t) => {
+  // Nothing recorded: a request to GitHub would be "Cannot reach GitHub".
+  const server = createWebServer({ open: opener({ github: replay({}) }) });
+  const address = await listen(server, 0);
+  t.after(() => server.close());
+  const response = await fetch(`${address}/api/scan?repository=${encodeURIComponent('https://github.com/JetBrains')}`);
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), {
+    error: 'One repository at a time: https://github.com/JetBrains is an organization or a user; skill-atlas scan https://github.com/JetBrains scans all of its repositories',
+  });
+});

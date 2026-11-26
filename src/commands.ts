@@ -2,11 +2,11 @@
 // terminal: everything that differs between them comes in through the context.
 import { AtlasError } from './core/errors.ts';
 import { skillLink, type Repository, type Skill } from './core/model.ts';
-import { scan, type Source } from './core/scan.ts';
+import { isOwner, scan, scanOwner, type Owner, type Source } from './core/scan.ts';
 
 export type Context = {
-  /** Opens what the user asked to scan. */
-  open(input: string): Promise<Source>;
+  /** Opens what the user asked to scan: a repository, or an organization's or a user's repositories. */
+  open(input: string): Promise<Source | Owner>;
   print(text: string): void;
   /** Errors and warnings. */
   error(text: string): void;
@@ -16,7 +16,8 @@ export type Context = {
 
 const usage = `Usage: skill-atlas <command>
 
-  scan <GitHub URL | directory>   find every SKILL.md in a repository and print it
+  scan <GitHub URL | directory>   find every SKILL.md in a repository and print it;
+                                  github.com/<owner>: in every repository of an organization or a user
   serve [port]                    open the web view at http://localhost:<port> (4173 by default)
   help                            show this help`;
 
@@ -38,8 +39,25 @@ export async function run(args: string[], context: Context): Promise<number> {
 
 async function scanCommand(args: string[], context: Context) {
   if (args.length !== 1) throw new AtlasError('Usage: skill-atlas scan <GitHub URL | directory>');
-  const result = await scan(await context.open(args[0]));
+  const opened = await context.open(args[0]);
+  if (isOwner(opened)) return scanOwnerCommand(opened, context);
+  const result = await scan(opened);
   printRepository(result.repository, result.skills, context);
+  for (const warning of result.warnings) context.error(`warning: ${warning}`);
+}
+
+/** The total, then each repository with skills, a blank line before it. */
+async function scanOwnerCommand(owner: Owner, context: Context) {
+  const result = await scanOwner(owner);
+  const skills = result.results.reduce((sum, repository) => sum + repository.skills.length, 0);
+  context.print(
+    `${result.owner} · ${count(skills, 'skill', 'skills')} in ${result.results.length} of ` +
+      count(result.scanned, 'repository', 'repositories'),
+  );
+  for (const repository of result.results) {
+    context.print('');
+    printRepository(repository.repository, repository.skills, context);
+  }
   for (const warning of result.warnings) context.error(`warning: ${warning}`);
 }
 
@@ -54,12 +72,16 @@ async function serveCommand(args: string[], context: Context) {
 
 /** `<owner>/<repo> · N skills`, then each skill's name, first sentence and link. */
 function printRepository(repository: Repository, skills: Skill[], { print }: Context) {
-  print(`${repository.id} · ${skills.length} ${skills.length === 1 ? 'skill' : 'skills'}`);
+  print(`${repository.id} · ${count(skills.length, 'skill', 'skills')}`);
   for (const skill of skills) {
     print(skill.description ? `${skill.name} — ${firstSentence(skill.description)}` : skill.name);
     print(`  ${skillLink(repository, skill)}`);
     if (skill.copies.length > 0) print(`  also in ${skill.copies.join(', ')}`);
   }
+}
+
+function count(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`;
 }
 
 function firstSentence(text: string): string {

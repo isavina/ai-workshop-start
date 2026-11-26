@@ -1,3 +1,4 @@
+import { EmptyRepositoryError, NotFoundError } from './errors.ts';
 import { findSkills, type SkillFile } from './find.ts';
 import { sortSkills, type Repository, type Skill } from './model.ts';
 import { parseSkill } from './parse.ts';
@@ -14,6 +15,73 @@ export type Source = {
 };
 
 export type ScanResult = { repository: Repository; skills: Skill[]; warnings: string[] };
+
+/** An organization or a user: its repositories, listed when asked, and how to open each one. */
+export type Owner = {
+  /** `https://github.com/<owner>`, as typed. */
+  url: string;
+  /** The owner's name as GitHub writes it, and its repositories as `owner/repo`, sorted. */
+  list(): Promise<{ owner: string; repositories: string[] }>;
+  /** One of the listed repositories. */
+  open(id: string): Promise<Source>;
+};
+
+export type OwnerResult = {
+  owner: string;
+  /** How many repositories were scanned, with skills or without. */
+  scanned: number;
+  /** The repositories with skills, by `owner/repo`. */
+  results: ScanResult[];
+  /** Each one starts with its repository: `owner/repo: …`. */
+  warnings: string[];
+};
+
+/** How many repositories are scanned at the same time. */
+const AT_ONCE = 8;
+
+/**
+ * Every repository of an owner, a few at a time. A repository that is gone, or has no such branch,
+ * is a warning and an empty one is left out; anything else, such as the rate limit, ends the scan.
+ */
+export async function scanOwner(owner: Owner): Promise<OwnerResult> {
+  const { owner: name, repositories } = await owner.list();
+  const outcomes: { result?: ScanResult; warning?: string }[] = [];
+  let next = 0;
+  let failed = false; // the others stop asking after a failure that ends the scan
+  async function worker() {
+    while (!failed && next < repositories.length) {
+      const index = next++;
+      const id = repositories[index];
+      try {
+        outcomes[index] = { result: await scan(await owner.open(id)) };
+      } catch (error) {
+        if (error instanceof EmptyRepositoryError) outcomes[index] = {};
+        else if (error instanceof NotFoundError) outcomes[index] = { warning: `${error.message}; skipped` };
+        else {
+          failed = true;
+          throw error;
+        }
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(AT_ONCE, repositories.length) }, worker));
+  const results = outcomes.flatMap((outcome) => (outcome.result ? [outcome.result] : []));
+  return {
+    owner: name,
+    scanned: repositories.length,
+    results: results.filter((result) => result.skills.length > 0),
+    warnings: outcomes.flatMap((outcome, index) => {
+      const id = repositories[index];
+      const own = outcome.result?.warnings ?? (outcome.warning ? [outcome.warning] : []);
+      return own.map((warning) => `${id}: ${warning}`);
+    }),
+  };
+}
+
+/** An owner's repositories, rather than one repository's files. */
+export function isOwner(opened: Source | Owner): opened is Owner {
+  return 'list' in opened;
+}
 
 /** fetch → find → parse. Nothing is stored: the result is all there is. */
 export async function scan(source: Source): Promise<ScanResult> {

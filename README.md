@@ -22,11 +22,14 @@ Requires Node.js 24 or later.
 $ ./skill-atlas scan https://github.com/JetBrains/kotlin            # the default branch
 $ ./skill-atlas scan github.com/JetBrains/MPS/tree/<branch, tag or commit>
 $ ./skill-atlas scan ~/projects/my-repository                       # a local checkout
+$ GITHUB_TOKEN=$(gh auth token) ./skill-atlas scan github.com/JetBrains   # every repository of an organization
 ```
 
 - Skills are sorted by name; each shows its description's first sentence and a link pinned to the
   scanned commit. `also in` lists the same skill in other agents' folders.
 - Warnings, such as malformed front matter, go to stderr; the scan goes on.
+- An organization or a user: every repository but forks and archived ones, at its default branch;
+  only those with skills are printed, after a total ([spec/analysis.md](spec/analysis.md#organization)).
 - GitHub allows 60 requests an hour without a token. Set `GITHUB_TOKEN` for more, for example
   `GITHUB_TOKEN=$(gh auth token) ./skill-atlas scan …`.
 
