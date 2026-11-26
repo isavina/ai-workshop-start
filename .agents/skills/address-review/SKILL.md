@@ -15,8 +15,32 @@ $ gh pr view <number> --json reviews,comments
 $ gh api --paginate repos/<owner>/<repo>/pulls/<number>/comments --jq '.[] | {id, in_reply_to_id, path, line, user: .user.login, body}'
 ```
 
-`--paginate`: without it only the first page (30) comes back, replies included. A comment with
-`in_reply_to_id` is a reply in an existing thread; the others are the ones to answer.
+`--paginate`: without it only the first page (30) comes back, replies included.
+
+Which threads wait for an answer depends on each thread's last comment, not on `in_reply_to_id`.
+A thread answered in an earlier round still has its first comment without `in_reply_to_id`. A
+reviewer's follow-up inside a thread has one. A thread waits when its last comment is not a reply of
+ours:
+
+```console
+$ gh api graphql --paginate -F owner=<owner> -F repo=<repo> -F number=<number> -f query='
+    query($owner: String!, $repo: String!, $number: Int!, $endCursor: String) {
+      repository(owner: $owner, name: $repo) { pullRequest(number: $number) {
+        reviewThreads(first: 100, after: $endCursor) {
+          nodes { path line
+            first: comments(first: 1) { nodes { databaseId } }
+            last: comments(last: 1) { nodes { databaseId author { login } body } } }
+          pageInfo { hasNextPage endCursor } } } } }' \
+  --jq '.data.repository.pullRequest.reviewThreads.nodes[] | .first.nodes[0] as $f | .last.nodes[0] as $l
+    | select($l.databaseId == $f.databaseId or $l.author.login != "<login>" or ($l.body | contains("<signature>") | not))
+    | {id: $f.databaseId, path, line, last: $l.body}'
+```
+
+`id` is the comment to reply to. `<login>` is the account the replies are posted from. GraphQL gives
+a bot's login without `[bot]`. `<signature>` is the signature on our replies, or `""` when we do not
+sign them. When the review and this skill post from the same account, for example one bot running
+both, the signature is the only way to tell our replies from the reviewer's comments. Each node is a
+whole thread, so a `--jq` that runs once per page still sees every thread whole.
 
 Then check out the pull request's branch and compare it with the remote:
 
