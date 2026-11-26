@@ -34,7 +34,9 @@ $ GITHUB_TOKEN=$(gh auth token) ./skill-atlas scan github.com/JetBrains   # ever
   `GITHUB_TOKEN=$(gh auth token) ./skill-atlas scan …`.
 
 Or in the browser: `./skill-atlas serve` opens a local web view at http://localhost:4173, with a field
-for a repository, its skills and each one's SKILL.md ([spec/web.md](spec/web.md)).
+for a repository, its skills and each one's SKILL.md ([spec/web.md](spec/web.md)). Paste
+`https://github.com/JetBrains` there for a whole organization, grouped by repository; start it with
+`GITHUB_TOKEN=$(gh auth token) ./skill-atlas serve` for that.
 
 ## What counts as a skill
 

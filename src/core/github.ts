@@ -60,6 +60,7 @@ export async function openOwner(input: string, options: GitHubOptions): Promise<
   const byId = new Map<string, RepositoryInfo>();
   return {
     url: `https://github.com/${login}`,
+    authenticated: Boolean(options.token),
     async list() {
       const listed: (RepositoryInfo & { fork: boolean; archived: boolean; owner: { login: string } })[] = [];
       for (let page = 1; ; page++) {
