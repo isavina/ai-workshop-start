@@ -5,9 +5,9 @@ What the user can fix gets a clear message, no stack trace, exit code 1
 
 **Needs:** network for steps 3–7.
 
-| # | Step | Expected (stderr), exit code |
+| # | Step | Expected (stderr unless said otherwise), exit code |
 | --- | --- | --- |
-| 1 | `./skill-atlas` | the usage, `Usage: skill-atlas <command>` with `scan`, `serve`, `help`; 0 |
+| 1 | `./skill-atlas` | on **stdout**, nothing on stderr: the usage, `Usage: skill-atlas <command>` with `scan`, `serve`, `help`; 0 |
 | 2 | `./skill-atlas scan /nope` | `Not a GitHub URL or a readable directory: /nope`; 1 |
 | 3 | `./skill-atlas scan github.com/JetBrains/no-such-repo-xyz` | `Repository not found: https://github.com/JetBrains/no-such-repo-xyz`; 1 |
 | 4 | `./skill-atlas scan github.com/JetBrains/koog/tree/no-such-branch-xyz` | `Branch, tag or commit not found in https://github.com/JetBrains/koog: no-such-branch-xyz`; 1 |

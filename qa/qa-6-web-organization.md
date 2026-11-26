@@ -18,8 +18,9 @@ An organization or a user on the page ([spec/web.md](../spec/web.md#organization
 
 3. **(browser)** Click a skill of `Kotlin/multik`
 
-   Expected: its `SKILL.md` with `Kotlin/multik · <path>`; the address
-   `?repository=https://github.com/Kotlin&skill=Kotlin/multik:<path>`; a reload shows it again.
+   Expected: its `SKILL.md` with `Kotlin/multik · <path>`; the address, percent-encoded, every `/` in
+   `<path>` too written `%2F`: `?repository=https%3A%2F%2Fgithub.com%2FKotlin&skill=Kotlin%2Fmultik%3A<path>`;
+   a reload shows it again.
 
 4. **(browser)** Scan `https://github.com/Kotlin`, then at once `<root>/fixture`
 

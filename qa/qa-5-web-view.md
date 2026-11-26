@@ -21,8 +21,9 @@
 
 4. **(browser)** Click `commits`
 
-   Expected: its `SKILL.md`, its path as a link, `also in .github/skills/commits/SKILL.md`. The address:
-   `?repository=<root>/fixture&skill=.claude/skills/commits/SKILL.md`.
+   Expected: its `SKILL.md`, its path as a link, `also in .github/skills/commits/SKILL.md`. The address,
+   percent-encoded, `<root>` too, with every `/` written `%2F` (`%2Fworkspaces%2F…`):
+   `?repository=<root>%2Ffixture&skill=.claude%2Fskills%2Fcommits%2FSKILL.md`.
 
 5. **(browser)** Reload the page
 
@@ -46,9 +47,9 @@
 
    Expected: the text shown as it is; no image, no alert.
 
-10. `curl -sI http://localhost:4173/` and `curl -s 'http://localhost:4173/api/scan?repository=/nope' -w ' %{http_code}\n'`
+10. `curl -s -D - -o /dev/null http://localhost:4173/` and `curl -s 'http://localhost:4173/api/scan?repository=/nope' -w ' %{http_code}\n'`
 
-    Expected: `Cache-Control: no-store`; `{"error":"Not a GitHub URL or a readable directory: /nope"} 400`.
+    Expected: `HTTP/1.1 200 OK` with `Cache-Control: no-store`; `{"error":"Not a GitHub URL or a readable directory: /nope"} 400`.
 
 11. From another machine on the network, open `http://<this machine's address>:4173`
 
