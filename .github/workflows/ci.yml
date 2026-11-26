@@ -13,6 +13,11 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # The browser tests compare pixels: they run where their baselines were made, Playwright's image,
+    # its Chromium, fonts and ffmpeg. Its version is the one in package.json.
+    container:
+      image: mcr.microsoft.com/playwright:v1.65.1-noble
+      options: --ipc=host
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -21,11 +26,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
-      # The browser tests: Google Chrome, as on the runner, and Playwright's ffmpeg for the videos.
-      - run: npx playwright install --with-deps ffmpeg
       - run: npm test
-        env:
-          PLAYWRIGHT_CHANNEL: chrome
       # A video of every browser test; on a failure, the actual and the diff screenshots too.
       - uses: actions/upload-artifact@v7
         if: ${{ !cancelled() }}

@@ -63,10 +63,18 @@ and `npx playwright show-report` shows them all.
 $ npx playwright install --with-deps chromium         # once
 $ npm run test:browser                                # only the browser tests
 $ PLAYWRIGHT_CHANNEL=chrome npm run test:browser      # with an installed Google Chrome instead
-$ npm run test:browser -- --update-snapshots          # after a change to the look: new baselines; review them
 ```
 
-Baselines are per platform (`…-linux.png`): fonts render differently elsewhere. Make them where CI runs.
+The screenshots are compared pixel for pixel, so they depend on the browser and the fonts. CI runs in
+Playwright's image, `mcr.microsoft.com/playwright:v<version in package.json>-noble`; after a change to
+the look, make new baselines in the same image, and review them:
+
+```console
+$ docker run --rm --network=host --ipc=host -v "$PWD":/work -w /work \
+    mcr.microsoft.com/playwright:v1.65.1-noble npx playwright test --update-snapshots
+```
+
+Upgrading `@playwright/test` (pinned) means the image tag in `.github/workflows/ci.yml` too, and new baselines.
 
 The end-to-end tests replay what GitHub answered for real repositories at fixed commits and compare
 the output with the stored one; both are in [tests/recordings/](tests/recordings/). To add or
