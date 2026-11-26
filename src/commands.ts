@@ -1,6 +1,7 @@
 // The skill-atlas commands. The same code serves the Node CLI and the browser
 // terminal: everything that differs between them comes in through the context.
 import { AtlasError } from './core/errors.ts';
+import { isFilter, skillFilter } from './core/filter.ts';
 import { skillLink, type Repository, type Skill } from './core/model.ts';
 import { isOwner, scan, scanOwner, type Owner, type Source } from './core/scan.ts';
 
@@ -18,6 +19,7 @@ const usage = `Usage: skill-atlas <command>
 
   scan <GitHub URL | directory>   find every SKILL.md in a repository and print it;
                                   github.com/<owner>: in every repository of an organization or a user
+    --filter <words>              only the skills with these words in their names and descriptions
   serve [port]                    open the web view at http://localhost:<port> (4173 by default)
   help                            show this help`;
 
@@ -37,28 +39,62 @@ export async function run(args: string[], context: Context): Promise<number> {
   }
 }
 
+const scanUsage = 'Usage: skill-atlas scan <GitHub URL | directory> [--filter <words>]';
+
+/** `<input>`, and the words of `--filter <words>` or `--filter=<words>`, if any. */
+function scanArguments(args: string[]): { input: string; words?: string } {
+  const inputs: string[] = [];
+  let words: string | undefined;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === '--filter' && i + 1 < args.length && words === undefined) words = args[++i];
+    else if (arg.startsWith('--filter=') && words === undefined) words = arg.slice('--filter='.length);
+    else if (arg.startsWith('--')) throw new AtlasError(scanUsage);
+    else inputs.push(arg);
+  }
+  if (inputs.length !== 1) throw new AtlasError(scanUsage);
+  return { input: inputs[0], words: isFilter(words) ? words.trim() : undefined };
+}
+
 async function scanCommand(args: string[], context: Context) {
-  if (args.length !== 1) throw new AtlasError('Usage: skill-atlas scan <GitHub URL | directory>');
-  const opened = await context.open(args[0]);
-  if (isOwner(opened)) return scanOwnerCommand(opened, context);
+  const { input, words } = scanArguments(args);
+  const opened = await context.open(input);
+  if (isOwner(opened)) return scanOwnerCommand(opened, words, context);
   const result = await scan(opened);
-  printRepository(result.repository, result.skills, context);
+  const skills = words ? result.skills.filter(skillFilter(words)) : result.skills;
+  printRepository(result.repository, skills, words ? result.skills.length : undefined, context);
+  if (words && skills.length === 0) context.print(noMatch(words));
   for (const warning of result.warnings) context.error(`warning: ${warning}`);
 }
 
-/** The total, then each repository with skills, a blank line before it. */
-async function scanOwnerCommand(owner: Owner, context: Context) {
+/** The total, then each repository with skills, a blank line before it; filtered, only those with a match. */
+async function scanOwnerCommand(owner: Owner, words: string | undefined, context: Context) {
   const result = await scanOwner(owner);
-  const skills = result.results.reduce((sum, repository) => sum + repository.skills.length, 0);
+  const matches = words ? skillFilter(words) : () => true;
+  const repositories = result.results
+    .map((repository) => ({ ...repository, matched: repository.skills.filter(matches) }))
+    .filter((repository) => repository.matched.length > 0);
+  const total = result.results.reduce((sum, repository) => sum + repository.skills.length, 0);
+  const matched = repositories.reduce((sum, repository) => sum + repository.matched.length, 0);
   context.print(
-    `${result.owner} · ${count(skills, 'skill', 'skills')} in ${result.results.length} of ` +
+    `${result.owner} · ${skillCount(matched, total, Boolean(words))} in ${repositories.length} of ` +
       count(result.scanned, 'repository', 'repositories'),
   );
-  for (const repository of result.results) {
+  for (const repository of repositories) {
     context.print('');
-    printRepository(repository.repository, repository.skills, context);
+    printRepository(repository.repository, repository.matched, words ? repository.skills.length : undefined, context);
   }
+  if (words && matched === 0) context.print(noMatch(words));
   for (const warning of result.warnings) context.error(`warning: ${warning}`);
+}
+
+/** `N skills`; filtered, `N of M skills`. */
+function skillCount(shown: number, total: number, filtered: boolean): string {
+  return filtered ? `${shown} of ${count(total, 'skill', 'skills')}` : count(shown, 'skill', 'skills');
+}
+
+function noMatch(words: string): string {
+  return `No skill matches "${words}"`;
 }
 
 async function serveCommand(args: string[], context: Context) {
@@ -70,9 +106,12 @@ async function serveCommand(args: string[], context: Context) {
   context.print(`Skill Atlas at ${await context.serve(port)} · Ctrl+C to stop`);
 }
 
-/** `<owner>/<repo> · N skills`, then each skill's name, first sentence and link. */
-function printRepository(repository: Repository, skills: Skill[], { print }: Context) {
-  print(`${repository.id} · ${count(skills.length, 'skill', 'skills')}`);
+/**
+ * `<owner>/<repo> · N skills`, or `N of M skills` when filtered (`total`), then each skill's name, first
+ * sentence and link.
+ */
+function printRepository(repository: Repository, skills: Skill[], total: number | undefined, { print }: Context) {
+  print(`${repository.id} · ${skillCount(skills.length, total ?? skills.length, total !== undefined)}`);
   for (const skill of skills) {
     print(skill.description ? `${skill.name} — ${firstSentence(skill.description)}` : skill.name);
     print(`  ${skillLink(repository, skill)}`);

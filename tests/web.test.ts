@@ -102,7 +102,8 @@ async function pageScript(search: string) {
   const page = await get('/');
   const script = /<script>([\s\S]*?)<\/script>/.exec(page.text)?.[1] ?? '';
   const elements: Record<string, FakeElement> = {};
-  for (const id of ['scan', 'status', 'warnings', 'skills', 'skill']) elements[id] = new FakeElement(id);
+  for (const id of ['scan', 'status', 'warnings', 'filter', 'skills', 'skill']) elements[id] = new FakeElement(id);
+  elements.filter.value = '';
   const field = new FakeElement('input');
   const button = new FakeElement('button');
   elements.scan.elements = { repository: field };
@@ -113,16 +114,21 @@ async function pageScript(search: string) {
   let timerId = 0;
   const windowListeners: Record<string, () => void> = {};
   const location = { search };
+  const addresses: string[] = [];
   const settle = () => new Promise((resolve) => setImmediate(resolve));
   runInNewContext(script, {
     document: {
       getElementById: (id: string) => elements[id],
       querySelector: () => main,
       createElement: (tag: string) => new FakeElement(tag),
+      addEventListener: () => {},
     },
     window: { addEventListener: (type: string, listener: () => void) => (windowListeners[type] = listener) },
     location,
-    history: { pushState: () => {}, replaceState: () => {} },
+    history: {
+      pushState: (_: unknown, __: string, url: string) => addresses.push(url),
+      replaceState: (_: unknown, __: string, url: string) => (addresses[Math.max(0, addresses.length - 1)] = url),
+    },
     URLSearchParams,
     Date,
     setInterval: (callback: () => void) => (timers.set(++timerId, callback), timerId),
@@ -141,7 +147,16 @@ async function pageScript(search: string) {
   return {
     status: elements.status,
     list: elements.skills,
+    article: elements.skill,
     main,
+    /** The address, as the page last set it. */
+    address: () => addresses.at(-1),
+    filter: (words: string) => {
+      elements.filter.value = words;
+      elements.filter.listeners.input({});
+    },
+    click: (name: string) =>
+      (elements.skills.querySelectorAll('button').find((button) => button.textContent.startsWith(name))?.onclick as () => void)(),
     button,
     fetches,
     tick: () => [...timers.values()].forEach((callback) => callback()),
@@ -317,4 +332,110 @@ test('the browser terminal has no web view of its own', async () => {
   const served = await atlas(['serve']);
   assert.equal(served.code, 1);
   assert.equal(served.stderr, 'serve: the web view runs only from the command line');
+});
+
+/** A scan as the API answers it: one repository's skills, or an owner's, grouped by repository. */
+const skillOf = (repository: string, name: string, description: string) => ({
+  id: `${repository}:.claude/skills/${name}/SKILL.md`,
+  name,
+  description,
+  path: `.claude/skills/${name}/SKILL.md`,
+  link: `https://github.com/${repository}/blob/x/.claude/skills/${name}/SKILL.md`,
+  copies: [],
+  text: `---\nname: ${name}\n---\n`,
+});
+const ONE = {
+  repository: { id: 'Acme/tools', url: 'https://github.com/Acme/tools' },
+  skills: [
+    skillOf('Acme/tools', 'code-review', 'Review a pull request.'),
+    skillOf('Acme/tools', 'commits', 'Write commit messages.'),
+    skillOf('Acme/tools', 'release', 'Tag and announce a release; review the notes.'),
+  ],
+  warnings: [],
+};
+const shownNames = (list: FakeElement) =>
+  list.querySelectorAll('span').filter((span) => span.className === 'name').map((span) => span.textContent);
+
+test('the page: the filter is instant, on the scan already done; N of M skills; the address keeps &q=', async () => {
+  const page = await pageScript('?repository=Acme%2Ftools');
+  await page.fetches[0].answer(ONE);
+  assert.equal(page.status.textContent, 'Acme/tools · 3 skills');
+  assert.deepEqual(shownNames(page.list), ['code-review', 'commits', 'release']);
+
+  page.filter('rev');
+  assert.equal(page.fetches.length, 1, 'never scans again');
+  assert.equal(page.status.textContent, 'Acme/tools · 2 of 3 skills');
+  assert.deepEqual(shownNames(page.list), ['code-review', 'release']);
+  // The words matched are marked, at the start of a word.
+  const marks = page.list.querySelectorAll('mark').map((mark) => mark.textContent);
+  assert.deepEqual(marks, ['rev', 'Rev', 'rev']);
+  assert.equal(page.address(), '?repository=Acme%2Ftools&q=rev&skill=.claude%2Fskills%2Fcode-review%2FSKILL.md');
+
+  // The same filter as the CLI: separators, several words, all of them.
+  page.filter('Code_Review');
+  assert.deepEqual(shownNames(page.list), ['code-review']);
+  page.filter('review notes');
+  assert.deepEqual(shownNames(page.list), ['release']);
+
+  // release, the only match, was selected; it stays, with every skill shown again.
+  page.filter('');
+  assert.equal(page.status.textContent, 'Acme/tools · 3 skills');
+  assert.equal(page.address(), '?repository=Acme%2Ftools&skill=.claude%2Fskills%2Frelease%2FSKILL.md');
+});
+
+test('the page: the selected skill stays open while it matches; otherwise the first match; no match → No skill matches', async () => {
+  const page = await pageScript('?repository=Acme%2Ftools');
+  await page.fetches[0].answer(ONE);
+  page.click('release');
+  assert.equal((page.article.querySelector('h2') as FakeElement).textContent, 'release');
+
+  page.filter('review');
+  assert.equal((page.article.querySelector('h2') as FakeElement).textContent, 'release', 'still matches');
+  page.filter('commit');
+  assert.equal((page.article.querySelector('h2') as FakeElement).textContent, 'commits', 'the first match');
+  assert.match(page.address() ?? '', /&q=commit&skill=\.claude%2Fskills%2Fcommits%2FSKILL\.md$/);
+
+  page.filter('deploy');
+  assert.deepEqual(shownNames(page.list), []);
+  assert.equal(page.list.textContent, 'No skill matches "deploy"');
+  assert.equal(page.status.textContent, 'Acme/tools · 0 of 3 skills');
+  assert.equal(page.article.children.length, 0);
+  assert.equal(page.main.hidden, false, 'the filter stays, to change it');
+  assert.equal(page.address(), '?repository=Acme%2Ftools&q=deploy');
+});
+
+test('the page: a filtered address, reloaded, shows the same; an organization, only repositories with a match', async () => {
+  const organization = {
+    owner: { name: 'Acme', url: 'https://github.com/Acme' },
+    scanned: 3,
+    repositories: [
+      { repository: { id: 'Acme/tools', url: 'https://github.com/Acme/tools' }, skills: ONE.skills },
+      { repository: { id: 'Acme/web', url: 'https://github.com/Acme/web' }, skills: [skillOf('Acme/web', 'deploy', 'Deploy the site.')] },
+    ],
+    warnings: [],
+  };
+  const page = await pageScript('?repository=github.com%2FAcme&q=review&skill=Acme%2Ftools%3A.claude%2Fskills%2Frelease%2FSKILL.md');
+  assert.equal(page.fetches[0].url, '/api/scan?repository=github.com%2FAcme', 'the whole scan: the page filters it');
+  await page.fetches[0].answer(organization);
+  assert.equal(page.status.textContent, 'Acme · 2 of 4 skills in 1 repository');
+  assert.deepEqual(
+    page.list.children.map((item) => (item as FakeElement).className === 'repository' ? `[${(item as FakeElement).textContent}]` : (item as FakeElement).textContent.split('.')[0]),
+    ['[Acme/tools2 skills]', 'code-reviewReview a pull request', 'releaseTag and announce a release; review the notes'],
+  );
+  assert.equal((page.article.querySelector('h2') as FakeElement).textContent, 'release');
+
+  page.filter('');
+  assert.equal(page.status.textContent, 'Acme · 4 skills in 2 repositories');
+});
+
+test('the page: a new scan keeps the filter, in the address too; it asks for the whole scan', async () => {
+  const page = await pageScript('?repository=Acme%2Ftools');
+  await page.fetches[0].answer(ONE);
+  page.filter('review');
+  page.submit('Acme/other');
+  assert.equal(page.address(), '?repository=Acme%2Fother&q=review');
+  assert.equal(page.fetches[1].url, '/api/scan?repository=Acme%2Fother');
+  await page.fetches[1].answer({ ...ONE, repository: { id: 'Acme/other', url: 'https://github.com/Acme/other' } });
+  assert.equal(page.status.textContent, 'Acme/other · 2 of 3 skills');
+  assert.deepEqual(shownNames(page.list), ['code-review', 'release']);
 });

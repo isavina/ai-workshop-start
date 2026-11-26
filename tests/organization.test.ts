@@ -155,11 +155,12 @@ test('an unknown organization or user → a clear message, exit code 1', async (
 });
 
 /** `GET /api/scan?repository=<input>` on the web view's server, with GitHub answering from `github`. */
-async function webScan(input: string, options: { github: ReturnType<typeof replay>; token?: string }) {
+async function webScan(input: string, options: { github: ReturnType<typeof replay>; token?: string; q?: string }) {
   const server = createWebServer({ open: opener(options) });
   const address = await listen(server, 0);
   try {
-    const response = await fetch(`${address}/api/scan?repository=${encodeURIComponent(input)}`);
+    const q = options.q === undefined ? '' : `&q=${encodeURIComponent(options.q)}`;
+    const response = await fetch(`${address}/api/scan?repository=${encodeURIComponent(input)}${q}`);
     return { status: response.status, body: JSON.parse(await response.text()) };
   } finally {
     server.close();
@@ -252,4 +253,35 @@ test('the web view: a tree too large is a warning; the rate limit, unreachable G
     github: replay({ [`${API}/users/Acme/repos?per_page=100&page=1`]: { status: 401, body: { message: 'Bad credentials' } } }),
   });
   assert.deepEqual(rejected, { status: 400, body: { error: 'GitHub rejected the token in GITHUB_TOKEN' } });
+});
+
+test('an organization, filtered: N of M skills in K of S repositories; repositories without a match left out', async () => {
+  const filtered = await atlas(['scan', 'github.com/Acme', '--filter', 'rev'], { github: replay(ACME) });
+  assert.equal(filtered.code, 0, filtered.stderr);
+  assert.equal(
+    filtered.stdout,
+    ['Acme · 1 of 4 skills in 1 of 6 repositories', '', 'Acme/Alpha · 1 of 2 skills', 'review — The review skill.', blob('Acme/Alpha', '.agents/skills/review/SKILL.md')].join('\n'),
+  );
+  // The warnings are the scan's, filtered or not.
+  assert.equal(filtered.stderr, (await atlas(['scan', 'github.com/Acme'], { github: replay(ACME) })).stderr);
+
+  const none = await atlas(['scan', 'github.com/Acme', '--filter', 'nothing'], { github: replay(ACME) });
+  assert.equal(none.code, 0);
+  assert.equal(none.stdout, ['Acme · 0 of 4 skills in 0 of 6 repositories', 'No skill matches "nothing"'].join('\n'));
+});
+
+test('the web view: an organization, filtered by &q=: the same skills as --filter, the total before filtering', async () => {
+  const cli = await atlas(['scan', 'github.com/Acme', '--filter', 'the skill'], { github: replay(ACME) });
+  const all = await webScan('github.com/Acme', { github: replay(ACME), q: 'the skill' });
+  assert.equal(all.status, 200);
+  assert.equal(all.body.total, 4);
+  assert.match(cli.stdout, /^Acme · 3 of 4 skills in 2 of 6 repositories$/m, 'plain has no description');
+  assert.deepEqual(
+    all.body.repositories.map((group: { repository: { id: string }; skills: { name: string }[] }) => [group.repository.id, group.skills.map((skill) => skill.name)]),
+    [['Acme/Alpha', ['build', 'review']], ['Acme/zeta', ['deploy']]],
+  );
+  for (const group of all.body.repositories) for (const { link } of group.skills) assert.ok(cli.stdout.split('\n').includes(`  ${link}`), link);
+
+  const none = await webScan('github.com/Acme', { github: replay(ACME), q: 'nothing' });
+  assert.deepEqual([none.body.total, none.body.repositories], [4, []]);
 });
