@@ -10,7 +10,7 @@ import { test } from 'node:test';
 import { openGitHub } from '../src/core/github.ts';
 import { parseSkill } from '../src/core/parse.ts';
 import { replay } from '../src/core/replay.ts';
-import { atlas, CLI, EXAMPLE_COMMIT, FIXTURE } from './helpers.ts';
+import { aliasBomb, atlas, CLI, EXAMPLE_COMMIT, FIXTURE } from './helpers.ts';
 
 const fixture = await atlas(['scan', FIXTURE]);
 const example = await atlas(['scan', 'github.com/JetBrains/example']);
@@ -22,6 +22,27 @@ test('malformed front matter → the directory name, no description and a warnin
   assert.equal(
     parsed.warning,
     'malformed front matter: Nested mappings are not allowed in compact mappings at line 3, column 14; using the directory name',
+  );
+});
+
+test('front matter with too many YAML aliases → malformed: the directory name, a warning, and the scan goes on', async (t) => {
+  const directory = aliasBomb();
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const root = pathToFileURL(directory).href;
+  const scanned = await atlas(['scan', directory]);
+  assert.equal(scanned.code, 0, scanned.stderr);
+  assert.equal(
+    scanned.stdout.split('\n').slice(1).join('\n'),
+    [
+      'fine — A fine skill.',
+      `  ${root}/.agents/skills/fine/SKILL.md`,
+      'laughs',
+      `  ${root}/.agents/skills/laughs/SKILL.md`,
+    ].join('\n'),
+  );
+  assert.equal(
+    scanned.stderr,
+    'warning: .agents/skills/laughs/SKILL.md: malformed front matter: Excessive alias count indicates a resource exhaustion attack; using the directory name',
   );
 });
 
