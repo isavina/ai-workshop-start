@@ -80,7 +80,7 @@ and `page.on('console')`. Use `curl` for the API.
 Upload the video next to the code, on a branch of its own (no `git push`; never to `main`):
 
 ```console
-$ gh api repos/<owner>/<repo>/git/refs/heads/red-agent-evidence --silent 2>/dev/null || \
+$ gh api repos/<owner>/<repo>/git/ref/heads/red-agent-evidence --silent 2>/dev/null || \
     gh api -X POST repos/<owner>/<repo>/git/refs -f ref=refs/heads/red-agent-evidence -f sha=$(gh api repos/<owner>/<repo>/commits/main --jq .sha)
 $ base64 < "$video" | tr -d '\n' > /tmp/video.b64
 $ gh api -X PUT repos/<owner>/<repo>/contents/red-agent/<key>.webm -f branch=red-agent-evidence \
