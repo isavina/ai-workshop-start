@@ -68,6 +68,12 @@ test('only this machine\'s names and its own page: another Host or Origin → 40
   for (const origin of ['http://evil.example', `http://localhost:${Number(port) + 1}`, `https://localhost:${port}`, `http://127.0.0.1:${port}`, 'null']) {
     assert.deepEqual(await raw(base, scanPath, { Host: `localhost:${port}`, Origin: origin }), refused, origin);
   }
+  // Another site's page with no Origin: an <img>, a <script> or a no-cors fetch. Browsers still send Sec-Fetch-Site.
+  for (const path of ['/', scanPath, '/api/scan?repository=github.com/JetBrains']) {
+    for (const site of ['cross-site', 'same-site', 'Cross-Site']) {
+      assert.deepEqual(await raw(base, path, { Host: `localhost:${port}`, 'Sec-Fetch-Site': site, 'Sec-Fetch-Mode': 'no-cors', 'Sec-Fetch-Dest': 'image' }), refused, `${path} ${site}`);
+    }
+  }
   assert.deepEqual(opened, [], 'nothing scanned');
 
   // Its own names, from its own page or with no Origin at all (a browser's address bar, curl).
@@ -78,6 +84,11 @@ test('only this machine\'s names and its own page: another Host or Origin → 40
     const scanned = await raw(base, scanPath, { Host: host!, ...(origin && { Origin: origin }) });
     assert.equal(scanned.status, 200, `${host} ${origin}`);
     assert.equal((JSON.parse(scanned.text) as { skills: unknown[] }).skills.length, 5);
+  }
+  // A browser's own requests: the address bar (Sec-Fetch-Site none) and the page's fetch (same-origin).
+  for (const [path, site] of [['/', 'none'], [scanPath, 'same-origin'], [scanPath, 'none']] as const) {
+    const answer = await raw(base, path, { Host: `localhost:${port}`, 'Sec-Fetch-Site': site, ...(site === 'same-origin' && { Origin: `http://localhost:${port}` }) });
+    assert.equal(answer.status, 200, `${path} ${site}`);
   }
 });
 
