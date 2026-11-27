@@ -89,14 +89,30 @@ test('a long input, 1,500 emoji: the CLI message, in the error colour; reloaded,
   await expect(page.getByRole('status')).toHaveClass('error');
 });
 
-test('an input too long for an address: a message, in the error colour; reloaded, the field and the message', async ({ page }) => {
+for (const [length, what] of [[1024 * 1024, '1 MiB'], [2 * 1024 * 1024 + 100, "over Chromium's 2 MB address limit"]] as const) {
+  test(`an input too long to scan, ${what}: the message, in the error colour; kept out of the address, reloaded, the bare page`, async ({ page }) => {
+    const input = 'x'.repeat(length);
+    await page.goto('/?repository=fixture');
+    await expect(page.getByRole('status')).toHaveText('fixture · 5 skills');
+    await scan(page, input);
+    await expect(page.getByRole('status')).toHaveText('Too long to be a repository: paste a GitHub URL or a directory');
+    await expect(page.getByRole('status')).toHaveClass('error');
+    await expect(page.getByLabel('Repository')).toHaveValue(input);
+    expect(new URL(page.url()).search).toBe('');
+    await page.reload();
+    await expect(page.getByLabel('Repository')).toHaveValue('');
+    await expect(page.getByRole('status')).toHaveText('');
+    await expect(page.locator('main')).toBeHidden();
+    await page.goBack();
+    await expect(page.getByRole('status')).toHaveText('fixture · 5 skills');
+  });
+}
+
+test('a linked address over 1 MiB: status 431 and the page, the field with the input and the message', async ({ page }) => {
   const input = 'x'.repeat(1024 * 1024);
-  await page.goto('/');
-  await page.getByLabel('Repository').fill(input);
-  await page.getByRole('button', { name: 'Scan' }).click();
-  await expect(page.getByRole('status')).toHaveText('Too long to be a repository: paste a GitHub URL or a directory');
-  await expect(page.getByRole('status')).toHaveClass('error');
-  await page.reload();
+  const response = await page.goto('/?repository=' + input);
+  expect(response?.status()).toBe(431);
   await expect(page.getByLabel('Repository')).toHaveValue(input);
   await expect(page.getByRole('status')).toHaveText('Too long to be a repository: paste a GitHub URL or a directory');
+  await expect(page.getByRole('status')).toHaveClass('error');
 });

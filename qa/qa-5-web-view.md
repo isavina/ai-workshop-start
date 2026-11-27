@@ -73,8 +73,14 @@
 
    Then paste more than 1 MiB (`node -e 'console.log("x".repeat(1048576))'`), press **Scan**, and reload
 
-   Expected: `Too long to be a repository: paste a GitHub URL or a directory`, as an error, before and
-   after the reload, the field with the input; never a blank page.
+   Expected: `Too long to be a repository: paste a GitHub URL or a directory`, as an error, the field
+   with the input; the address is the bare `http://localhost:4173/`, and the reload gives the bare page:
+   an empty field, no message. The same with more than 2 MB (`node -e 'console.log("x".repeat(2097252))'`). **Back** gives the
+   `/nope` error again.
+
+   Then open `http://localhost:4173/?repository=` followed by more than 1 MiB of `x`
+
+   Expected: the page, the field with the input, `Too long to be a repository: …` as an error; never a blank page.
 
 13. **(browser)** Scan a repository whose `SKILL.md` has HTML, such as a local copy of `fixture` with
    `<img src=x onerror=alert(1)>` added to a description

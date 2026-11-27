@@ -329,6 +329,19 @@ test('the page: an input too long for the server to read → Too long to be a re
   assert.equal((await scanOf(longest)).body.error, `Not a GitHub URL or a readable directory: ${longest}`);
 });
 
+test('the page: an input too long to scan, submitted, stays out of the address: the bare page instead', async () => {
+  const page = await pageScript('?repository=' + encodeURIComponent('/nope'));
+  await page.fetches[0].answer({ error: 'x' });
+  page.submit('x'.repeat(MAX_INPUT + 1));
+  assert.equal(page.fetches.length, 1);
+  assert.equal(page.status.textContent, TOO_LONG);
+  assert.equal(page.address(), '/');
+  // The longest it scans still goes into the address, to be reloaded.
+  page.submit('x'.repeat(MAX_INPUT));
+  assert.equal(page.address(), '?repository=' + 'x'.repeat(MAX_INPUT));
+  assert.equal(page.fetches.length, 2);
+});
+
 test('the page: an answer that is not JSON is said as such, in the error colour, not as an unreachable server', async () => {
   const page = await pageScript('?repository=' + encodeURIComponent('/nope'));
   await page.fetches[0].fail(431, 'Request Header Fields Too Large');

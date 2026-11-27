@@ -294,6 +294,9 @@ function marked(text) {
   return parts.filter((part) => part !== '');
 }
 
+/** More than the server reads: the page never asks for it. */
+const tooLong = (repository) => encodeURIComponent(repository).length > MAX_INPUT;
+
 /** Counts the scans: only the latest one may show its progress and result, and enable the button. */
 let loading = 0;
 
@@ -312,7 +315,7 @@ async function load(repository, selected) {
   main.hidden = true;
   current = undefined;
   try {
-    if (encodeURIComponent(repository).length > MAX_INPUT) return say(TOO_LONG, true);
+    if (tooLong(repository)) return say(TOO_LONG, true);
     const response = await fetch('/api/scan?repository=' + encodeURIComponent(repository));
     // Not JSON: the server answered, with something other than a scan.
     const result = await response.json().catch(() => undefined);
@@ -408,7 +411,10 @@ function setAddress(how, repository = current.repository, skill = current && cur
 form.addEventListener('submit', (event) => {
   event.preventDefault();
   const repository = field.value.trim();
-  setAddress('pushState', repository, null);
+  // An input it will not scan stays out of the address, so a reload never meets a browser's address
+  // limit (Chromium drops one over 2 MB): the bare page instead.
+  if (tooLong(repository)) history.pushState(null, '', '/');
+  else setAddress('pushState', repository, null);
   load(repository);
 });
 
