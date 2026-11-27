@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { request } from 'node:http';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -29,6 +30,66 @@ test('only on this machine', () => {
   const bound = server.address();
   assert.equal(typeof bound === 'object' && bound?.address, '127.0.0.1');
   assert.match(address, /^http:\/\/localhost:\d+$/);
+});
+
+/** A request with the headers a browser elsewhere would send, `Host` too, which `fetch` does not let set. */
+function raw(base: string, path: string, headers: Record<string, string>) {
+  return new Promise<{ status: number; text: string }>((resolve, reject) => {
+    const sent = request(`${base}${path}`, { headers, setHost: 'Host' in headers }, (response) => {
+      let text = '';
+      response.setEncoding('utf8').on('data', (chunk) => (text += chunk));
+      response.on('end', () => resolve({ status: response.statusCode ?? 0, text }));
+    });
+    sent.on('error', reject).end();
+  });
+}
+
+test('only this machine\'s names and its own page: another Host or Origin → 403, no page, no scan', async (t) => {
+  const opened: string[] = [];
+  const open = opener();
+  const guarded = createWebServer({ open: (input) => (opened.push(input), open(input)) });
+  const base = await listen(guarded, 0);
+  t.after(() => guarded.close());
+  const port = new URL(base).port;
+  const scanPath = `/api/scan?repository=${encodeURIComponent(FIXTURE)}`;
+  const refused = { status: 403, text: JSON.stringify({ error: 'Skill Atlas answers only http://localhost or http://127.0.0.1, from its own page' }) };
+
+  // DNS rebinding: a name someone else owns, pointed at 127.0.0.1; its page asks for itself.
+  for (const path of ['/', scanPath, '/api/scan?repository=github.com/JetBrains']) {
+    assert.deepEqual(await raw(base, path, { Host: `attacker.test:${port}` }), refused, path);
+    assert.deepEqual(await raw(base, path, { Host: `attacker.test:${port}`, Origin: `http://attacker.test:${port}` }), refused, path);
+  }
+  for (const host of ['evil.example', `localhost.evil.example:${port}`, `127.0.0.1.nip.io:${port}`, `0.0.0.0:${port}`, `[::1]:${port}`, 'local host']) {
+    assert.deepEqual(await raw(base, scanPath, { Host: host }), refused, host);
+  }
+  // No Host at all: Node's server refuses it before it reaches the page or a scan.
+  assert.equal((await raw(base, scanPath, {})).status, 400, 'no Host');
+  // Another site's page asking this server, by its right name.
+  for (const origin of ['http://evil.example', `http://localhost:${Number(port) + 1}`, `https://localhost:${port}`, `http://127.0.0.1:${port}`, 'null']) {
+    assert.deepEqual(await raw(base, scanPath, { Host: `localhost:${port}`, Origin: origin }), refused, origin);
+  }
+  // Another site's page with no Origin: an <img>, a <script> or a no-cors fetch. Browsers still send Sec-Fetch-Site.
+  for (const path of ['/', scanPath, '/api/scan?repository=github.com/JetBrains']) {
+    for (const site of ['cross-site', 'same-site', 'Cross-Site']) {
+      assert.deepEqual(await raw(base, path, { Host: `localhost:${port}`, 'Sec-Fetch-Site': site, 'Sec-Fetch-Mode': 'no-cors', 'Sec-Fetch-Dest': 'image' }), refused, `${path} ${site}`);
+    }
+  }
+  assert.deepEqual(opened, [], 'nothing scanned');
+
+  // Its own names, from its own page or with no Origin at all (a browser's address bar, curl).
+  for (const [host, origin] of [[`localhost:${port}`, undefined], [`127.0.0.1:${port}`, undefined],
+    [`localhost:${port}`, `http://localhost:${port}`], [`127.0.0.1:${port}`, `http://127.0.0.1:${port}`], [`LocalHost:${port}`, `http://localhost:${port}`]]) {
+    const page = await raw(base, '/', { Host: host!, ...(origin && { Origin: origin }) });
+    assert.equal(page.status, 200, `${host} ${origin}`);
+    const scanned = await raw(base, scanPath, { Host: host!, ...(origin && { Origin: origin }) });
+    assert.equal(scanned.status, 200, `${host} ${origin}`);
+    assert.equal((JSON.parse(scanned.text) as { skills: unknown[] }).skills.length, 5);
+  }
+  // A browser's own requests: the address bar (Sec-Fetch-Site none) and the page's fetch (same-origin).
+  for (const [path, site] of [['/', 'none'], [scanPath, 'same-origin'], [scanPath, 'none']] as const) {
+    const answer = await raw(base, path, { Host: `localhost:${port}`, 'Sec-Fetch-Site': site, ...(site === 'same-origin' && { Origin: `http://localhost:${port}` }) });
+    assert.equal(answer.status, 200, `${path} ${site}`);
+  }
 });
 
 test('the page: a field for a repository, the skills and the selected SKILL.md', async () => {
@@ -309,6 +370,8 @@ test('skill-atlas serve: prints its address, serves the page and scans, stores n
   assert.match(await (await fetch(url)).text(), /<title>Skill Atlas<\/title>/);
   const scanned = (await (await fetch(`${url}/api/scan?repository=${encodeURIComponent(FIXTURE)}`)).json()) as { skills: unknown[] };
   assert.equal(scanned.skills.length, 5);
+  const elsewhere = await raw(url, `/api/scan?repository=${encodeURIComponent(FIXTURE)}`, { Host: 'evil.example', Origin: 'http://evil.example' });
+  assert.equal(elsewhere.status, 403);
   assert.deepEqual(readdirSync(cwd), []);
 });
 

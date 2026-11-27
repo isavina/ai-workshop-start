@@ -1,6 +1,10 @@
 # Web view
 `./skill-atlas serve [port]`: a local page at `http://localhost:<port>`, 4173 by default
 - Prints its address; runs until stopped. Only on *this machine* (`127.0.0.1`)
+- Answers only its own names, `Host` `localhost` or `127.0.0.1` (any port), and only its own page: an `Origin`, if sent,
+  is that same address, and a `Sec-Fetch-Site`, if sent, is `same-origin` or `none` (the address bar). Another `Host`,
+  as DNS rebinding brings, another site's `Origin`, or another site's request with no `Origin` (an `<img>`, a no-cors
+  `fetch`: `Sec-Fetch-Site` `cross-site` or `same-site`) → status 403, `{ error }`; no page, no scan, nothing asked of GitHub
 - A port in use, or not a port → a clear message, exit code 1
 ## Page
 - A **field** for a repository: what `scan` takes, a GitHub URL, `…/tree/<ref>`, a directory or `github.com/<owner>`

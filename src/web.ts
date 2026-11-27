@@ -15,7 +15,7 @@ export type WebOptions = {
  * `GET /`: the page. `GET /api/scan?repository=<GitHub URL | directory | github.com/<owner>>`: the
  * scan as JSON, an owner's grouped by repository, or `{ error }` with status 400 for what the CLI
  * would explain and exit 1 for. `&q=<words>` keeps only the skills matching them, as `--filter` does, and
- * adds `total`, the skills before filtering.
+ * adds `total`, the skills before filtering. Another `Host`, or a request from another site → 403: see `fromThisMachine`.
  */
 export function createWebServer({ open }: WebOptions): Server {
   return createServer(async (request, response) => {
@@ -26,6 +26,9 @@ export function createWebServer({ open }: WebOptions): Server {
     };
     const json = (status: number, body: unknown) => send(status, 'application/json', JSON.stringify(body));
 
+    if (!fromThisMachine(request.headers.host, request.headers.origin, request.headers['sec-fetch-site'])) {
+      return json(403, { error: 'Skill Atlas answers only http://localhost or http://127.0.0.1, from its own page' });
+    }
     if (request.method !== 'GET') return json(405, { error: 'Only GET' });
     if (url.pathname === '/') return send(200, 'text/html', PAGE);
     if (url.pathname !== '/api/scan') return json(404, { error: `Not found: ${url.pathname}` });
@@ -67,6 +70,26 @@ export function createWebServer({ open }: WebOptions): Server {
       json(500, { error: `Unexpected error: ${error instanceof Error ? error.message : String(error)}` });
     }
   });
+}
+
+/**
+ * A request this machine's browser sent to this server, by its own name: `Host` is `localhost` or
+ * `127.0.0.1`, any port, and `Origin`, when there is one, is that same address. Another name, as DNS
+ * rebinding brings (`attacker.test` pointed at 127.0.0.1), or another site's page asking → no.
+ * Another site's `<img>` or no-cors `fetch` sends no `Origin`, but browsers still send `Sec-Fetch-Site`:
+ * only `same-origin` (the page's own fetch) and `none` (the address bar) pass; curl sends neither.
+ */
+function fromThisMachine(host: string | undefined, origin: string | undefined, site: string | undefined): boolean {
+  if (site !== undefined && !['same-origin', 'none'].includes(site.toLowerCase())) return false;
+  if (!host) return false;
+  let address: URL;
+  try {
+    address = new URL(`http://${host}`);
+  } catch {
+    return false;
+  }
+  if (address.hostname !== 'localhost' && address.hostname !== '127.0.0.1') return false;
+  return origin === undefined || origin.toLowerCase() === address.origin;
 }
 
 function repositoryJson({ id, url, commit }: Repository) {

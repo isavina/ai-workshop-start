@@ -81,3 +81,11 @@
 15. From another machine on the network, open `http://<this machine's address>:4173`
 
     Expected: it does not connect: the server listens on 127.0.0.1 only.
+
+16. `curl -s -H 'Host: evil.example' 'http://127.0.0.1:4173/api/scan?repository=<root>/fixture' -w ' %{http_code}\n'`,
+    then the same with `-H 'Host: localhost:4173' -H 'Origin: http://evil.example'`, and with
+    `-H 'Host: localhost:4173' -H 'Sec-Fetch-Site: cross-site'` (another site's `<img>`, which sends no `Origin`)
+
+    Expected: all three `{"error":"Skill Atlas answers only http://localhost or http://127.0.0.1, from its own page"} 403`:
+    another name for this machine, as DNS rebinding brings, or another site's page, gets no page and no scan.
+    Without those headers, the scan as in step 14.
