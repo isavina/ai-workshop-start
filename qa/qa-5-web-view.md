@@ -75,8 +75,9 @@
 
    Expected: `Too long to be a repository: paste a GitHub URL or a directory`, as an error, the field
    with the input; the address is the bare `http://localhost:4173/`, and the reload gives the bare page:
-   an empty field, no message. The same with more than 2 MB (`node -e 'console.log("x".repeat(2097252))'`). **Back** gives the
-   `/nope` error again.
+   an empty field, no message. The same with more than 2 MB (`node -e 'console.log("x".repeat(2097252))'`). Each too-long
+   **Scan** adds its own bare `/` to the history, so **Back** gives the bare page of the 1 MiB input;
+   **Back** again, the emoji error; **Back** a third time, the `/nope` error.
 
    Then open `http://localhost:4173/?repository=` followed by more than 1 MiB of `x`
 
