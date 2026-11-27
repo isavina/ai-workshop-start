@@ -2,15 +2,15 @@
 // ./fixture and for small GitHub repositories answered in tests/helpers.ts and below.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
 import { openGitHub } from '../src/core/github.ts';
 import { parseSkill } from '../src/core/parse.ts';
 import { replay } from '../src/core/replay.ts';
-import { atlas, CLI, EXAMPLE_COMMIT, FIXTURE } from './helpers.ts';
+import { atlas, CLI, EXAMPLE_COMMIT, FIXTURE, UNPRIVILEGED, withUnreadableSubdirectory } from './helpers.ts';
 
 const fixture = await atlas(['scan', FIXTURE]);
 const example = await atlas(['scan', 'github.com/JetBrains/example']);
@@ -129,6 +129,34 @@ test('the CLI prints the result at once and stores nothing', (t) => {
   assert.equal(scanned.status, 0, scanned.stderr);
   assert.equal(scanned.stdout, `${fixture.stdout}\n`);
   assert.deepEqual(readdirSync(cwd), []);
+});
+
+test('a local directory: an unreadable subdirectory → a warning, the scan goes on', (t) => {
+  const root = withUnreadableSubdirectory(t);
+  const scanned = spawnSync(process.execPath, [CLI, 'scan', root], { encoding: 'utf8', ...UNPRIVILEGED });
+  assert.equal(scanned.status, 0, scanned.stderr);
+  assert.equal(
+    scanned.stdout,
+    [
+      `${basename(root)} · 1 skill`,
+      'ok — fine',
+      `  ${pathToFileURL(join(root, '.agents/skills/ok/SKILL.md')).href}`,
+      '',
+    ].join('\n'),
+  );
+  assert.equal(scanned.stderr, 'warning: private: cannot read this directory; skipped\n');
+});
+
+test('a local directory that is itself unreadable → a clear message, exit code 1', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'skill-atlas-'));
+  t.after(() => {
+    chmodSync(root, 0o755);
+    rmSync(root, { recursive: true, force: true });
+  });
+  chmodSync(root, 0);
+  const scanned = spawnSync(process.execPath, [CLI, 'scan', root], { encoding: 'utf8', ...UNPRIVILEGED });
+  assert.equal(scanned.status, 1);
+  assert.equal(scanned.stderr, `Not a GitHub URL or a readable directory: ${root}\n`);
 });
 
 test('unreachable repository → a clear message, exit code 1', async () => {
