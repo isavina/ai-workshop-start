@@ -147,6 +147,17 @@ test('a local directory: an unreadable subdirectory → a warning, the scan goes
   assert.equal(scanned.stderr, 'warning: private: cannot read this directory; skipped\n');
 });
 
+test('a local directory: the warnings for unreadable subdirectories in path order', (t) => {
+  // `data-old` sorts before `data: …` as a message, after `data` as a path.
+  const root = withUnreadableSubdirectory(t, ['data-old', 'data']);
+  const scanned = spawnSync(process.execPath, [CLI, 'scan', root], { encoding: 'utf8', ...UNPRIVILEGED });
+  assert.equal(scanned.status, 0, scanned.stderr);
+  assert.equal(
+    scanned.stderr,
+    ['warning: data: cannot read this directory; skipped', 'warning: data-old: cannot read this directory; skipped', ''].join('\n'),
+  );
+});
+
 test('a local directory that is itself unreadable → a clear message, exit code 1', (t) => {
   const root = mkdtempSync(join(tmpdir(), 'skill-atlas-'));
   t.after(() => {

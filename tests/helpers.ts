@@ -60,17 +60,19 @@ export function printed({ stdout, stderr }: { stdout: string; stderr: string }):
  */
 export const UNPRIVILEGED = process.getuid?.() === 0 ? { uid: 65534, gid: 65534 } : {};
 
-/** A directory with the skill `ok` and an unreadable subdirectory, `private`; removed after the test. */
-export function withUnreadableSubdirectory(t: { after(fn: () => void): void }): string {
+/** A directory with the skill `ok` and unreadable subdirectories, `private` by default; removed after the test. */
+export function withUnreadableSubdirectory(t: { after(fn: () => void): void }, unreadable = ['private']): string {
   const root = mkdtempSync(join(tmpdir(), 'skill-atlas-'));
   t.after(() => {
-    chmodSync(join(root, 'private'), 0o755);
+    for (const name of unreadable) chmodSync(join(root, name), 0o755);
     rmSync(root, { recursive: true, force: true });
   });
   chmodSync(root, 0o755); // readable by `nobody`
   mkdirSync(join(root, '.agents/skills/ok'), { recursive: true });
   writeFileSync(join(root, '.agents/skills/ok/SKILL.md'), '---\nname: ok\ndescription: fine\n---\n');
-  mkdirSync(join(root, 'private'));
-  chmodSync(join(root, 'private'), 0);
+  for (const name of unreadable) {
+    mkdirSync(join(root, name));
+    chmodSync(join(root, name), 0);
+  }
   return root;
 }
