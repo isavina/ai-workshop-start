@@ -202,3 +202,61 @@ test('a branch, tag or commit: /tree/<ref> is resolved to the commit the links p
   assert.equal(unknown.code, 1);
   assert.equal(unknown.stderr, 'Branch, tag or commit not found in https://github.com/JetBrains/example: no-such-branch');
 });
+
+/** What GitHub answers for a fork with one skill: code search does not index it. */
+function fork(id: string, { truncated = false } = {}) {
+  const tree = [{ path: '.agents/skills/qa/SKILL.md', mode: '100644', type: 'blob', sha: 'b1' }];
+  return replay({
+    [`https://api.github.com/repos/${id}`]: { status: 200, body: { full_name: id, default_branch: 'main', fork: true } },
+    [`https://api.github.com/repos/${id}/commits/main`]: { status: 200, body: { sha: EXAMPLE_COMMIT } },
+    [`https://api.github.com/search/code?q=filename:SKILL.md+repo:${id}&per_page=100&page=1`]: {
+      status: 200,
+      body: { total_count: 0, incomplete_results: false, items: [] },
+    },
+    [`https://api.github.com/repos/${id}/git/trees/${EXAMPLE_COMMIT}?recursive=1`]: {
+      status: 200,
+      body: { truncated, tree: truncated ? [] : tree },
+    },
+    // Only asked for when the tree is too large: walked down to .agents/skills.
+    [`https://api.github.com/repos/${id}/git/trees/${EXAMPLE_COMMIT}`]: {
+      status: 200,
+      body: { truncated: false, tree: [{ path: '.agents', mode: '040000', type: 'tree', sha: 'agents' }] },
+    },
+    [`https://api.github.com/repos/${id}/git/trees/agents`]: {
+      status: 200,
+      body: { truncated: false, tree: [{ path: 'skills', mode: '040000', type: 'tree', sha: 'skills' }] },
+    },
+    [`https://api.github.com/repos/${id}/git/trees/skills?recursive=1`]: {
+      status: 200,
+      body: { truncated: false, tree: [{ path: 'qa/SKILL.md', mode: '100644', type: 'blob', sha: 'b1' }] },
+    },
+    [`https://raw.githubusercontent.com/${id}/${EXAMPLE_COMMIT}/.agents/skills/qa/SKILL.md`]: {
+      status: 200,
+      body: '---\nname: qa\ndescription: Check the change in the browser.\n---\n',
+    },
+  });
+}
+
+test('with a token, code search that finds nothing (a fork, or not indexed yet) → the tree', async () => {
+  const expected = [
+    'Me/fork · 1 skill',
+    'qa — Check the change in the browser.',
+    `  https://github.com/Me/fork/blob/${EXAMPLE_COMMIT}/.agents/skills/qa/SKILL.md`,
+  ].join('\n');
+  for (const url of ['https://github.com/Me/fork', 'https://github.com/Me/fork/tree/main']) {
+    const scanned = await atlas(['scan', url], { github: fork('Me/fork') });
+    assert.equal(scanned.code, 0, scanned.stderr);
+    assert.equal(scanned.stdout, expected);
+    assert.equal(scanned.stderr, '');
+  }
+
+  // A tree too large: only the skill roots, and the warning says why code search did not help.
+  const big = await atlas(['scan', 'https://github.com/Me/fork'], { github: fork('Me/fork', { truncated: true }) });
+  assert.equal(big.code, 0, big.stderr);
+  assert.equal(big.stdout, expected);
+  assert.equal(
+    big.stderr,
+    'warning: the tree is too large to list at once; looked only in .agents/skills, .claude/skills, .github/skills, agent/skills ' +
+      '(code search found nothing: a fork, or not indexed yet)',
+  );
+});

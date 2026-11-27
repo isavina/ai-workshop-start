@@ -17,6 +17,7 @@ Skill: id = `repo:path`, name, description, commit, the SKILL.md text
 - Unreachable repository, or an unknown branch, tag or commit → a clear message, exit code 1
 - An empty repository, without a commit → a clear message, exit code 1
 - Code search (with `GITHUB_TOKEN`) only on the default branch; elsewhere, the tree
+- Code search finds nothing (a **fork**, or *not indexed yet*) → the tree, as without a token
 - A tree too large for one answer → only the skill roots at the repository root, and a *warning*
 ## Organization
 `github.com/<owner>`: every repository of an organization or a user, each scanned as above

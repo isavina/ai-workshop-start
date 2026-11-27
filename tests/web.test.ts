@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
+import { replay } from '../src/core/replay.ts';
 import { createWebServer, listen } from '../src/web.ts';
 import { atlas, CLI, EXAMPLE_COMMIT, FIXTURE, opener } from './helpers.ts';
 
@@ -257,6 +258,42 @@ test('a GitHub repository: its skills, each with its full description, pinned li
     ],
     warnings: [],
   });
+});
+
+test('a fork, with GITHUB_TOKEN at its default branch: code search finds nothing, its skills come from the tree', async (t) => {
+  const forked = createWebServer({
+    open: opener({
+      github: replay({
+        'https://api.github.com/repos/isavina/ai-workshop-start': {
+          status: 200,
+          body: { full_name: 'isavina/ai-workshop-start', default_branch: 'main', fork: true },
+        },
+        'https://api.github.com/repos/isavina/ai-workshop-start/commits/main': { status: 200, body: { sha: EXAMPLE_COMMIT } },
+        'https://api.github.com/search/code?q=filename:SKILL.md+repo:isavina/ai-workshop-start&per_page=100&page=1': {
+          status: 200,
+          body: { total_count: 0, incomplete_results: false, items: [] },
+        },
+        [`https://api.github.com/repos/isavina/ai-workshop-start/git/trees/${EXAMPLE_COMMIT}?recursive=1`]: {
+          status: 200,
+          body: { truncated: false, tree: [{ path: '.agents/skills/qa/SKILL.md', mode: '100644', type: 'blob', sha: 'b1' }] },
+        },
+        [`https://raw.githubusercontent.com/isavina/ai-workshop-start/${EXAMPLE_COMMIT}/.agents/skills/qa/SKILL.md`]: {
+          status: 200,
+          body: '---\nname: qa\ndescription: Check the change in the browser. Use before a pull request.\n---\n',
+        },
+      }),
+    }),
+  });
+  const at = await listen(forked, 0);
+  t.after(() => forked.close());
+  const response = await fetch(`${at}/api/scan?repository=${encodeURIComponent('https://github.com/isavina/ai-workshop-start')}`);
+  assert.equal(response.status, 200);
+  const body = (await response.json()) as { skills: { name: string; description: string; path: string }[]; warnings: string[] };
+  assert.deepEqual(
+    body.skills.map(({ name, description, path }) => ({ name, description, path })),
+    [{ name: 'qa', description: 'Check the change in the browser. Use before a pull request.', path: '.agents/skills/qa/SKILL.md' }],
+  );
+  assert.deepEqual(body.warnings, []);
 });
 
 test('a directory: the same skills, order, copies and warnings as the CLI; each SKILL.md as it is', async () => {

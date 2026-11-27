@@ -10,6 +10,8 @@ export type GitHubOptions = {
   /**
    * With a token, skills on the default branch are found through code search; without it, or at
    * another branch, tag or commit, through the tree: code search sees only the default branch.
+   * Code search that finds nothing falls back to the tree: GitHub does not index forks, nor
+   * repositories it has not indexed yet.
    */
   token?: string;
 };
@@ -93,7 +95,11 @@ async function openRepository(github: Client, info: RepositoryInfo, ref: string,
   );
   const warnings: string[] = [];
   const hint = how === 'tree' ? 'GITHUB_TOKEN searches everywhere on the default branch' : 'scan it alone with GITHUB_TOKEN to search everywhere';
-  const paths = how === 'search' ? await searchPaths(github, id) : await treePaths(github, id, sha, warnings, hint);
+  let paths = how === 'search' ? await searchPaths(github, id) : await treePaths(github, id, sha, warnings, hint);
+  // Not in the search index (a fork, or too new): the tree has what code search does not.
+  if (how === 'search' && paths.length === 0) {
+    paths = await treePaths(github, id, sha, warnings, 'code search found nothing: a fork, or not indexed yet');
+  }
   const [organization, repo] = id.split('/');
   return {
     repository: { id, organization, name: repo, url: `https://github.com/${id}`, commit: sha },
