@@ -83,21 +83,43 @@ $ jq -n --arg text "$STATUS" --arg since "<since, ISO 8601>" --arg until "<until
 
 The last post's `until`, for step 1, before anything is posted. `conversations.history` takes only the
 channel's ID (`#is-test-air-bot` → `channel_not_found`), so look the ID up by name first; the channel
-is private, hence `private_channel` (scopes `channels:read`, `groups:read`):
+is private, hence `private_channel` (scopes `channels:read`, `groups:read`). Keep each raw reply and
+check `.ok` before reading it: a reply with `ok: false` has no `.channels` or `.messages`, and jq on it
+prints nothing, which would look like "no channel" or "no earlier post". `conversations.list` pages
+with `response_metadata.next_cursor` and may return fewer channels than `limit` when more exist, so
+follow the cursor until the channel turns up or the cursor is empty:
 
 ```console
-$ CHANNEL_ID=$(curl -s -G https://slack.com/api/conversations.list -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
-    --data-urlencode types=public_channel,private_channel --data-urlencode exclude_archived=true --data-urlencode limit=1000 \
-  | jq -r '.channels[] | select(.name == "is-test-air-bot") | .id')       # empty → say so; fall back to 24 hours
-$ curl -s -G https://slack.com/api/conversations.history -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
-    --data-urlencode channel="$CHANNEL_ID" --data-urlencode include_all_metadata=true --data-urlencode limit=200 \
-  | jq -r '[.messages[] | select(.metadata.event_type == "skill_atlas_status")][0].metadata.event_payload.until // empty'
+$ CHANNEL_ID= CURSOR= SLACK_ERROR=
+$ while :; do
+    R=$(curl -s -G https://slack.com/api/conversations.list -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+      --data-urlencode types=public_channel,private_channel --data-urlencode exclude_archived=true \
+      --data-urlencode limit=1000 --data-urlencode cursor="$CURSOR")
+    jq -e .ok <<<"$R" >/dev/null || { SLACK_ERROR="conversations.list: $(jq -r '.error // "no JSON reply"' <<<"$R")"; break; }
+    CHANNEL_ID=$(jq -r '.channels[] | select(.name == "is-test-air-bot") | .id' <<<"$R")
+    CURSOR=$(jq -r '.response_metadata.next_cursor // empty' <<<"$R")
+    { [ -n "$CHANNEL_ID" ] || [ -z "$CURSOR" ]; } && break
+  done
+$ [ -n "$CHANNEL_ID" ] && {
+    R=$(curl -s -G https://slack.com/api/conversations.history -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+      --data-urlencode channel="$CHANNEL_ID" --data-urlencode include_all_metadata=true --data-urlencode limit=200)
+    jq -e .ok <<<"$R" >/dev/null || SLACK_ERROR="conversations.history: $(jq -r '.error // "no JSON reply"' <<<"$R")"
+  }
+$ [ -z "$SLACK_ERROR" ] && [ -n "$CHANNEL_ID" ] \
+  && jq -r '[.messages[] | select(.metadata.event_type == "skill_atlas_status")][0].metadata.event_payload.until // empty' <<<"$R"
+$ echo "${SLACK_ERROR:-ok}"
 ```
 
-`ok: false` → say the `error` in the report (`not_in_channel`: invite the bot; `missing_scope`: the
-token needs `chat:write`, `channels:read` and `groups:read`, and `channels:history` or `groups:history`
-for a private channel). No
-`SLACK_BOT_TOKEN` → print the status instead of posting it, and say so.
+- Both calls succeeded and found the last post → its `until` is the since.
+- Both succeeded and found nothing (no such channel on any page, or no earlier post) → 24 hours ago,
+  and the report says which.
+- `SLACK_ERROR` set → do not fall back silently and do not post: print the status instead, and say the
+  `error` in the report (`not_in_channel`: invite the bot; `missing_scope`: the token needs
+  `chat:write`, `channels:read` and `groups:read`, and `channels:history` or `groups:history` for a
+  private channel).
+
+The same for the post: `ok: false` → say the `error` in the report. No `SLACK_BOT_TOKEN` → print the
+status instead of posting it, and say so.
 
 ## Report
 
