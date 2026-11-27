@@ -33,9 +33,11 @@ Please reply in this thread.
 ```
 
 Put the same questions in a comment on the issue, so they stay with it. Then wait for a reply **in
-that thread**, in the foreground, as [address-review](../address-review/SKILL.md#6-ask-on-slack) says (never end your turn to wait: the run would end with it): read it every two minutes, for up to 30 minutes from the first message, and follow the
-first reply from a person in `SLACK_REVIEWERS` newer than `after`. `after` is at first the message's
-own `ts`; each reply handled becomes the new `after`, and your own messages do not move it.
+that thread**, in the foreground, as [address-review](../address-review/SKILL.md#6-ask-on-slack)
+says (never end your turn to wait: the run would end with it): read it every two minutes, for up to
+30 minutes from the first message, and follow the first reply from a person in `SLACK_REVIEWERS`
+newer than `after`. `after` is at first the message's own `ts`; each reply handled becomes the new
+`after`, and your own messages do not move it.
 
 - Answers → go on with them; add them to the issue as a comment, and to the spec in step 3.
 - Unclear → ask once more in the thread; that reply's `ts` becomes `after`, and wait again, still up

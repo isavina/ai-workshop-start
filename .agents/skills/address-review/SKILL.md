@@ -154,28 +154,39 @@ The replies to follow: from a reviewer, newer than `after`, plain or also sent t
 (`thread_broadcast`), without bots and other subtypes:
 
 ```console
-$ curl -s -G https://slack.com/api/conversations.replies -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
-    --data-urlencode channel=<channel> --data-urlencode ts=<ts> \
-  | jq --arg after <after> --arg reviewers "$SLACK_REVIEWERS" '.messages[1:][]
+$ resp=$(curl -s -G https://slack.com/api/conversations.replies -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+    --data-urlencode channel=<channel> --data-urlencode ts=<ts>)
+$ jq --arg after <after> --arg reviewers "$SLACK_REVIEWERS" '.messages[1:][]
       | select(.bot_id == null and (.subtype == null or .subtype == "thread_broadcast"))
       | select((.ts | tonumber) > ($after | tonumber))
       | select(.user as $u | any($reviewers | split(",")[] | gsub("\\s"; ""); . == $u))
-      | {user, ts, text}'
+      | {user, ts, text}' <<<"$resp"
 ```
+
+Keep the raw response in `resp` and check its `ok` first: on `ok: false`, or no response at all, the
+filter prints nothing, the same as no reply yet.
 
 **Wait in the foreground.** Do not end your turn while waiting, and do not wait in a background task,
 a monitor or a scheduled wake-up: in an automation the run ends with your turn, and nothing wakes it
 again, so the reply is never read and no pull request or commit comes out. Instead, run the read in a
 loop that blocks, as one command that stays under the tool's time limit, and run that command again
-until a reply comes or the time is up:
+until a reply comes or the time is up. The Bash tool stops a command after 2 minutes unless the call
+sets its `timeout`: run the loop with `timeout` set to 600000 (10 minutes, the most it allows).
 
 ```console
-$ for i in 1 2 3 4; do                      # 4 × 2 minutes: one command under 10 minutes
-    replies=$(<the read above>)
+$ for i in 1 2 3 4; do                      # 4 × 2 minutes: under the 10-minute `timeout`
+    resp=$(<the curl above>)
+    if [ "$(jq -r .ok <<<"$resp" 2>/dev/null)" != true ]; then
+      err=$(jq -r '.error // empty' <<<"$resp" 2>/dev/null)
+      echo "slack error: ${err:-no response}"; break
+    fi
+    replies=$(<the jq filter above> <<<"$resp")
     [ -n "$replies" ] && { echo "$replies"; break; }
     sleep 120
   done
 ```
+
+`slack error: …` → stop waiting: say the error in the report, as for `ok: false` above, and go on.
 
 Follow them one at a time, oldest first: each reply handled becomes the new `after`, and the thread
 is read again right away, before waiting, so a reply sent meanwhile is not skipped:
