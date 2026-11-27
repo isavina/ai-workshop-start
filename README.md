@@ -44,9 +44,11 @@ above the skills narrows them as you type, and `/` jumps to it. Paste
 `GITHUB_TOKEN=$(gh auth token) ./skill-atlas serve` for that.
 [A short demo](docs/demo/organization-scan.mp4) of an organization scan.
 [A 20-second tour](docs/demo/web-view.mp4) of the web view, with English subtitles
-([web-view.en.srt](docs/demo/web-view.en.srt)): an organization scan, the filter, an error, and this
-repository's automation skills as Air automations (code review, address review, issue to pull request,
-QA, red agent, status update) and their Slack posts.
+([web-view.en.srt](docs/demo/web-view.en.srt)): an organization scan, the filter, an error; then the Air
+automations of this project. They start from a [GitHub issue](https://github.com/isavina/ai-workshop-start/issues)
+labelled `Delegated to AI`, yours or a bug the red agent found: one opens a pull request for it, or first
+asks for details on Slack; another reviews the pull request, another answers the review, another tests it
+on request; and a status update comes to Slack when asked.
 
 ## What counts as a skill
 

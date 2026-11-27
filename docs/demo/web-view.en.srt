@@ -1,27 +1,35 @@
 1
-00:00:00,000 --> 00:00:01,540
-Skill Atlas web view: every SKILL.md in a repository or organization
+00:00:00,000 --> 00:00:03,578
+Skill Atlas web view: scan a whole organization, github.com/ndkoval
 
 2
-00:00:01,590 --> 00:00:04,568
-Scan a whole organization: paste github.com/ndkoval
-
-3
-00:00:04,618 --> 00:00:06,867
+00:00:03,628 --> 00:00:05,007
 Skills grouped by repository; broken front matter shows as a warning
 
-4
-00:00:06,917 --> 00:00:09,022
+3
+00:00:05,057 --> 00:00:06,359
 Filter by text: instant, no new scan, matches highlighted
 
-5
-00:00:09,072 --> 00:00:12,046
+4
+00:00:06,409 --> 00:00:08,450
 Error handling: a clear message, never a partial result
 
+5
+00:00:08,500 --> 00:00:10,950
+It starts with a GitHub issue labelled "Delegated to AI": yours, or a bug the Red Agent found
+
 6
-00:00:12,096 --> 00:00:15,950
-Air automations: code review, address review, issue to PR, QA, red agent, status update
+00:00:11,000 --> 00:00:13,250
+Air automation "Issue To PR" implements it and opens a pull request…
 
 7
-00:00:16,000 --> 00:00:19,950
-Slack: the bot asks questions on issues and posts status updates to #is-test-air-bot
+00:00:13,300 --> 00:00:15,450
+…or first asks for details on Slack, then goes on with the answers
+
+8
+00:00:15,500 --> 00:00:17,950
+Then Code Review reviews the PR, Address Review answers, QA tests it on request
+
+9
+00:00:18,000 --> 00:00:19,950
+And a status update in Slack, whenever you ask for one
