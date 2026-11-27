@@ -203,11 +203,14 @@ test('a branch, tag or commit: /tree/<ref> is resolved to the commit the links p
   assert.equal(unknown.stderr, 'Branch, tag or commit not found in https://github.com/JetBrains/example: no-such-branch');
 });
 
-/** What GitHub answers for a fork with one skill: code search does not index it. */
-function fork(id: string, { truncated = false } = {}) {
+/**
+ * What GitHub answers for a repository with one skill that code search does not find: a fork, which
+ * it does not index, or, with `fork: false`, a repository not indexed yet.
+ */
+function fork(id: string, { truncated = false, fork = true } = {}) {
   const tree = [{ path: '.agents/skills/qa/SKILL.md', mode: '100644', type: 'blob', sha: 'b1' }];
   return replay({
-    [`https://api.github.com/repos/${id}`]: { status: 200, body: { full_name: id, default_branch: 'main', fork: true } },
+    [`https://api.github.com/repos/${id}`]: { status: 200, body: { full_name: id, default_branch: 'main', fork } },
     [`https://api.github.com/repos/${id}/commits/main`]: { status: 200, body: { sha: EXAMPLE_COMMIT } },
     [`https://api.github.com/search/code?q=filename:SKILL.md+repo:${id}&per_page=100&page=1`]: {
       status: 200,
@@ -257,6 +260,16 @@ test('with a token, code search that finds nothing (a fork, or not indexed yet) 
   assert.equal(
     big.stderr,
     'warning: the tree is too large to list at once; looked only in .agents/skills, .claude/skills, .github/skills, agent/skills ' +
-      '(code search found nothing: a fork, or not indexed yet)',
+      '(code search found nothing: a fork)',
+  );
+
+  // Not a fork: maybe indexed and without skills, maybe not indexed yet; the warning does not guess.
+  const notFork = await atlas(['scan', 'https://github.com/Me/new'], { github: fork('Me/new', { truncated: true, fork: false }) });
+  assert.equal(notFork.code, 0, notFork.stderr);
+  assert.equal(notFork.stdout, expected.replaceAll('Me/fork', 'Me/new'));
+  assert.equal(
+    notFork.stderr,
+    'warning: the tree is too large to list at once; looked only in .agents/skills, .claude/skills, .github/skills, agent/skills ' +
+      '(code search found no SKILL.md)',
   );
 });
