@@ -28,7 +28,8 @@ A **Cluster** button next to the filter field: the skills shown, grouped by topi
 - On the scan already done: it *never scans again*; it asks `claude -p` once, through `POST /api/cluster`
 - Clusters by label, `Other` last; each `<label> · N skills`, its skills by name; on an organization, each skill with its repository
 - The total says ` · K clusters`; the button is pressed; again → the plain list
-- While it clusters, the button says so and waits; a new scan or a filter change drops an answer still coming
+- While it clusters, the button says so and waits; a new scan, a filter change or a press again drops an answer still coming,
+  and stops its request: the server stops `claude -p`
 - The filtered skills only; changing the filter drops the clusters: the plain, filtered list
 - Fewer than 2 skills shown → the button is disabled
 - An error (no `claude`, failing, invalid, 2 minutes) → the message, in the error colour; the plain list stays
@@ -57,8 +58,9 @@ each of `repositories`, with skills only: `{ repository, skills }`, as above
 `POST /api/cluster` with `{ skills: [{ id, name, description }] }` → `{ clusters: [{ label, skills: [<id>] }] }`,
 sorted, `Other` last; fewer than 2 skills → `{ clusters: [] }`, Claude not asked; a malformed body, or what
 `--cluster` would exit 1 for → status 400, `{ error }`
-- It runs the user's `claude`: only for the page. Not JSON → 415; an `Origin` or `Host` other than
-  `localhost` or `127.0.0.1` → 403 (another site, a rebound domain); Claude not asked
+- It runs the user's `claude`: only for the page. Not JSON → 415; a `Host` other than `localhost` or
+  `127.0.0.1` (a rebound domain), or an `Origin` other than this server's own address, port included
+  (another site, another local server) → 403; Claude not asked
 - More than 10 MB → status 400, a clear message; the page gone before the answer → `claude -p` is stopped
 ## Look
 How the page looks is part of what it does: a real browser compares it, pixel for pixel, with a

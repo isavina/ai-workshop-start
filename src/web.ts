@@ -97,17 +97,22 @@ export function createWebServer({ open, cluster }: WebOptions): Server {
 /** The most a cluster request may send: far more than an organization's names and descriptions. */
 const MAX_BODY = 10 * 1024 * 1024;
 
-/** Whether the request names this machine, as the page's own requests do: `localhost` or `127.0.0.1`. */
+/**
+ * Whether the request is the page's own: it names this machine, `localhost` or `127.0.0.1`, and comes
+ * from this server's address, port included; another local server's page is not this one.
+ */
 function fromThisPage(request: IncomingMessage): boolean {
-  const local = (host: string | undefined) => {
+  const parse = (url: string) => {
     try {
-      return host !== undefined && ['localhost', '127.0.0.1'].includes(new URL(host).hostname);
+      return new URL(url);
     } catch {
-      return false;
+      return undefined;
     }
   };
+  const self = request.headers.host === undefined ? undefined : parse(`http://${request.headers.host}`);
+  if (!self || !['localhost', '127.0.0.1'].includes(self.hostname)) return false;
   const origin = request.headers.origin;
-  return local(`http://${request.headers.host}`) && (origin === undefined || local(origin));
+  return origin === undefined || parse(origin)?.origin === self.origin;
 }
 
 /** The request's body, up to MAX_BODY; the rest is read and dropped, so the 400 still reaches the page. */
@@ -361,10 +366,14 @@ let loading = 0;
 /** Counts the cluster requests: only the latest, for the scan and the filter still shown, may show its answer. */
 let clustering = 0;
 let waitingForClusters = false;
+/** Stops the cluster request still coming: the server then stops its claude -p. */
+let stopClustering;
 
-/** Back to the plain list; an answer still coming is dropped. */
+/** Back to the plain list; an answer still coming is dropped, and its request stopped. */
 function dropClusters() {
   clustering++;
+  if (stopClustering) stopClustering.abort();
+  stopClustering = undefined;
   waitingForClusters = false;
   clusterButton.textContent = 'Cluster';
   if (current) current.clusters = undefined;
@@ -511,10 +520,13 @@ async function cluster() {
   // Too few to cluster, as after a reload with &cluster=1: the plain list, and its address.
   if (skills.length < 2) return setAddress('replaceState');
   const mine = ++clustering;
+  const stop = new AbortController();
+  stopClustering = stop;
   waitingForClusters = true;
   clusterButton.disabled = true;
   clusterButton.textContent = 'Clustering…';
   const done = () => {
+    stopClustering = undefined;
     waitingForClusters = false;
     clusterButton.textContent = 'Cluster';
   };
@@ -523,6 +535,7 @@ async function cluster() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ skills: skills.map((skill) => ({ id: key(skill), name: skill.name, description: skill.description })) }),
+      signal: stop.signal,
     });
     const answer = await response.json();
     if (mine !== clustering) return;
@@ -532,6 +545,7 @@ async function cluster() {
     setAddress('replaceState');
     if (!response.ok) say(answer.error, true);
   } catch (error) {
+    // Dropped, and so stopped: its AbortError is not shown.
     if (mine !== clustering) return;
     done();
     render();

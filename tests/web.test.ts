@@ -112,7 +112,8 @@ async function pageScript(search: string) {
   elements.scan.elements = { repository: field };
   elements.scan.append(button);
   const main = new FakeElement('main');
-  const fetches: { url: string; init?: { method?: string; body?: string }; answer: (body: unknown, ok?: boolean) => Promise<void> }[] = [];
+  type Init = { method?: string; body?: string; signal?: AbortSignal };
+  const fetches: { url: string; init?: Init; answer: (body: unknown, ok?: boolean) => Promise<void> }[] = [];
   const timers = new Map<number, () => void>();
   let timerId = 0;
   const windowListeners: Record<string, () => void> = {};
@@ -136,8 +137,11 @@ async function pageScript(search: string) {
     Date,
     setInterval: (callback: () => void) => (timers.set(++timerId, callback), timerId),
     clearInterval: (id: number) => timers.delete(id),
-    fetch: (url: string, init?: { method?: string; body?: string }) =>
-      new Promise((resolve) => {
+    AbortController,
+    // As a browser's: stopped by its signal, it fails with an AbortError.
+    fetch: (url: string, init?: Init) =>
+      new Promise((resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('The operation was aborted.', 'AbortError')));
         fetches.push({
           url,
           init,
@@ -458,7 +462,7 @@ async function clusterServer(t: { after(callback: () => void): void }, cluster?:
   const server = createWebServer({ open: opener(), cluster });
   const address = await listen(server, 0);
   t.after(() => server.close());
-  return async (body: unknown, method = 'POST', headers: Record<string, string> = { 'Content-Type': 'application/json' }) => {
+  const post = async (body: unknown, method = 'POST', headers: Record<string, string> = { 'Content-Type': 'application/json' }) => {
     const response = await fetch(`${address}/api/cluster`, {
       method,
       headers,
@@ -466,6 +470,7 @@ async function clusterServer(t: { after(callback: () => void): void }, cluster?:
     });
     return { status: response.status, body: await response.json() };
   };
+  return Object.assign(post, { address });
 }
 
 const FIXTURE_SKILLS = [
@@ -553,8 +558,16 @@ test('POST /api/cluster: only from the page: JSON, from this machine; another si
     status: 403,
     body: { error: 'Only from the Skill Atlas page' },
   });
+  // Another server on this machine, another port: not this page.
+  const port = Number(new URL(post.address).port);
+  for (const origin of ['http://localhost:3000', `http://127.0.0.1:${port + 1}`, `https://localhost:${port}`]) {
+    assert.deepEqual(await post(skills, 'POST', { 'Content-Type': 'application/json', Origin: origin }), {
+      status: 403,
+      body: { error: 'Only from the Skill Atlas page' },
+    }, origin);
+  }
+  assert.deepEqual(asked, []);
   // A domain rebound to 127.0.0.1: its own origin, but not this machine's name.
-  const port = Number(new URL(address).port);
   const rebound = await new Promise<number | undefined>((resolve, reject) => {
     const request = httpRequest({ host: '127.0.0.1', port, path: '/api/cluster', method: 'POST', headers: { Host: `evil.example:${port}`, 'Content-Type': 'application/json' } }, (response) => {
       response.resume();
@@ -565,6 +578,9 @@ test('POST /api/cluster: only from the page: JSON, from this machine; another si
   });
   assert.equal(rebound, 403);
   assert.deepEqual(asked, []);
+  // The page's own requests, from its address: accepted.
+  assert.equal((await post(skills, 'POST', { 'Content-Type': 'application/json', Origin: post.address })).status, 400);
+  assert.equal(asked.length, 1);
 });
 
 test('POST /api/cluster: the page gone → claude -p is stopped', async (t) => {
@@ -655,6 +671,36 @@ test('the page: only the filtered skills are clustered; changing the filter drop
   await page.fetches[2].answer(ACME_CLUSTERS);
   assert.equal(page.status.textContent, 'Acme/tools · 3 skills');
   assert.deepEqual(listed(page.list), ['code-review', 'commits', 'release']);
+});
+
+test('the page: an answer dropped → its request is stopped, so the server stops claude -p; the error is not shown', async () => {
+  const page = await pageScript('?repository=Acme%2Ftools');
+  await page.fetches[0].answer(ONE);
+  assert.equal(page.fetches[0].init?.signal, undefined, 'a scan is not a cluster request');
+  const dropped = async (drop: () => void | Promise<void>) => {
+    await page.cluster();
+    const request = page.fetches.at(-1);
+    assert.equal(request?.url, '/api/cluster');
+    assert.equal(request?.init?.signal?.aborted, false);
+    await drop();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(request?.init?.signal?.aborted, true);
+    assert.notEqual(page.status.className, 'error');
+    assert.doesNotMatch(page.status.textContent, /Cannot reach|abort/i);
+  };
+  await dropped(() => page.filter('re'));
+  page.filter('');
+  // Pressed again while it clusters: the plain list.
+  await dropped(() => page.cluster());
+  // A new scan.
+  await dropped(() => page.submit('Acme/tools'));
+  await page.fetches.at(-1)?.answer(ONE);
+  // An answer that came is not stopped afterwards.
+  await page.cluster();
+  const answered = page.fetches.at(-1);
+  await answered?.answer(ACME_CLUSTERS);
+  page.filter('re');
+  assert.equal(answered?.init?.signal?.aborted, false);
 });
 
 test('the page: a new scan drops an answer still coming; fewer than 2 skills shown → Cluster disabled', async () => {
