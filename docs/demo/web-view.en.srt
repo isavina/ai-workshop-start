@@ -1,0 +1,37 @@
+1
+00:00:02,550 --> 00:00:05,465
+Paste an organization, and Skill Atlas finds every skill in it
+
+2
+00:00:05,565 --> 00:00:06,810
+Grouped by repository, with a heads-up for broken files
+
+3
+00:00:06,910 --> 00:00:08,082
+Type to filter — matches light up instantly
+
+4
+00:00:08,182 --> 00:00:09,850
+A typo? You get a clear message, not a broken page
+
+5
+00:00:09,950 --> 00:00:11,950
+Every task starts as an issue labelled “Delegated to AI” —
+from you, or from the Red Agent hunting bugs
+
+6
+00:00:12,050 --> 00:00:14,050
+Air picks it up and opens a pull request…
+
+7
+00:00:14,150 --> 00:00:16,150
+…or asks on Slack first, if something is unclear
+
+8
+00:00:16,250 --> 00:00:18,350
+Then it reviews the PR, answers the comments,
+and tests it when you ask
+
+9
+00:00:18,450 --> 00:00:19,850
+And whenever you like, a status update lands in Slack
