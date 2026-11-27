@@ -1,0 +1,27 @@
+1
+00:00:00,000 --> 00:00:01,540
+Skill Atlas web view: every agent skill on GitHub, in one page
+
+2
+00:00:01,590 --> 00:00:04,568
+Scan a whole organization: paste github.com/ndkoval
+
+3
+00:00:04,618 --> 00:00:06,867
+Skills grouped by repository; broken front matter shows as a warning
+
+4
+00:00:06,917 --> 00:00:09,022
+Filter by text: instant, no new scan, matches highlighted
+
+5
+00:00:09,072 --> 00:00:12,046
+Error handling: a clear message, never a partial result
+
+6
+00:00:12,096 --> 00:00:16,504
+Our automations: issue to PR, code review, address review
+
+7
+00:00:16,554 --> 00:00:19,950
+Slack: questions and status updates go to #is-test-air-bot
