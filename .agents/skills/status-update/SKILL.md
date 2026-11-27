@@ -14,8 +14,11 @@ posted; nothing is guessed.
 - **Since:** the time and date you were given ("since 09:30", "since yesterday 14:00"). None → the
   `until` of this skill's last post in the channel (step 4). No earlier post → 24 hours ago.
 - **Until:** now.
-- Times in **CET** (`Europe/Berlin`), as the header shows them: `27 Nov 2026, 09:30 – 12:30 CET`, or
-  with both dates when the window crosses midnight: `26 Nov 2026, 14:00 – 27 Nov 2026, 12:30 CET`.
+- Times in **`Europe/Berlin`**, converted with that zone (`TZ=Europe/Berlin date`), never a fixed
+  offset: it is CET (UTC+1) in winter and CEST (UTC+2) from late March to late October. The header
+  shows the zone's abbreviation for the date (`date +%Z`): `27 Nov 2026, 09:30 – 12:30 CET`,
+  `15 Jun 2026, 09:30 – 12:30 CEST`, or with both dates when the window crosses midnight:
+  `26 Nov 2026, 14:00 – 27 Nov 2026, 12:30 CET`.
 
 ## 2. Collect, from GitHub
 
@@ -53,8 +56,8 @@ Status · 27 Nov 2026, 09:30 – 12:30 CET
 ✅ #18: Slack steps wait in the foreground
 👀 #21: Cluster the skills by topic with claude -p, closes #19
 @Air
-🔄 #22: Another site can read local SKILL.md files, delegated
 👀 #27: Warn on a YAML alias bomb in front matter, closes #23
+🔄 #22: Another site can read local SKILL.md files, delegated
 ```
 
 - `#<number>: <title>`, the title shortened to what was done, then a few words when they help: `closes
@@ -78,16 +81,22 @@ $ jq -n --arg text "$STATUS" --arg since "<since, ISO 8601>" --arg until "<until
       -H 'Content-Type: application/json; charset=utf-8' --data @- | jq '{ok, error, channel, ts}'
 ```
 
-The last post's `until`, for step 1 (the channel's id is the `channel` a post answers with):
+The last post's `until`, for step 1, before anything is posted. `conversations.history` takes only the
+channel's ID (`#is-test-air-bot` → `channel_not_found`), so look the ID up by name first; the channel
+is private, hence `private_channel` (scopes `channels:read`, `groups:read`):
 
 ```console
+$ CHANNEL_ID=$(curl -s -G https://slack.com/api/conversations.list -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+    --data-urlencode types=public_channel,private_channel --data-urlencode exclude_archived=true --data-urlencode limit=1000 \
+  | jq -r '.channels[] | select(.name == "is-test-air-bot") | .id')       # empty → say so; fall back to 24 hours
 $ curl -s -G https://slack.com/api/conversations.history -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
-    --data-urlencode channel=<channel id> --data-urlencode include_all_metadata=true --data-urlencode limit=200 \
+    --data-urlencode channel="$CHANNEL_ID" --data-urlencode include_all_metadata=true --data-urlencode limit=200 \
   | jq -r '[.messages[] | select(.metadata.event_type == "skill_atlas_status")][0].metadata.event_payload.until // empty'
 ```
 
 `ok: false` → say the `error` in the report (`not_in_channel`: invite the bot; `missing_scope`: the
-token needs `chat:write`, and `channels:history` or `groups:history` for a private channel). No
+token needs `chat:write`, `channels:read` and `groups:read`, and `channels:history` or `groups:history`
+for a private channel). No
 `SLACK_BOT_TOKEN` → print the status instead of posting it, and say so.
 
 ## Report
