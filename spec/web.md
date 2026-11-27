@@ -9,6 +9,11 @@
 - The selected skill's **SKILL.md**: as it is, front matter included; its link, `also in`
 - Warnings and errors: the same messages as the CLI, on the page
 - The address keeps `?repository=…&skill=<path>`: a scan can be linked and reloaded
+  - A long input, such as 1,500 emoji (18 KB %-encoded), is read: the CLI message, also after a reload
+  - The server reads addresses up to 1 MiB; a longer one → status 431 and the page, the field with the input
+  - An input the server could not read, over 960 KiB %-encoded → `Too long to be a repository: paste a GitHub URL or a directory`,
+    in the error colour; nothing asked of the server
+- An answer from the server that is not JSON → `The Skill Atlas server answered <status> <text>, not a scan`, not an unreachable server
 ## Filter
 A **filter field** above the skills: the [same filter as `--filter`](cli.md#filter), names and descriptions
 - *Instant*, on the scan already done: it never scans again

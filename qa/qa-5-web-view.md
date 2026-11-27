@@ -66,6 +66,16 @@
 
    Expected: `Not a GitHub URL or a readable directory: /nope`, as an error, on the page.
 
+   Then paste 1,500 × 😀 (`node -e 'console.log("😀".repeat(1500))'`), press **Scan**, and reload the page
+
+   Expected: `Not a GitHub URL or a readable directory: 😀😀…`, as an error, before and after the
+   reload; after the reload, the field with the emoji in it. Never `Cannot reach the Skill Atlas server`.
+
+   Then paste more than 1 MiB (`node -e 'console.log("x".repeat(1048576))'`), press **Scan**, and reload
+
+   Expected: `Too long to be a repository: paste a GitHub URL or a directory`, as an error, before and
+   after the reload, the field with the input; never a blank page.
+
 13. **(browser)** Scan a repository whose `SKILL.md` has HTML, such as a local copy of `fixture` with
    `<img src=x onerror=alert(1)>` added to a description
 

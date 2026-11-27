@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
-import { createWebServer, listen } from '../src/web.ts';
+import { createWebServer, listen, MAX_ADDRESS, MAX_INPUT, TOO_LONG } from '../src/web.ts';
 import { atlas, CLI, EXAMPLE_COMMIT, FIXTURE, opener } from './helpers.ts';
 
 const server = createWebServer({ open: opener() });
@@ -109,7 +109,7 @@ async function pageScript(search: string) {
   elements.scan.elements = { repository: field };
   elements.scan.append(button);
   const main = new FakeElement('main');
-  const fetches: { url: string; answer: (body: unknown) => Promise<void> }[] = [];
+  const fetches: { url: string; answer: (body: unknown) => Promise<void>; fail: (status: number, statusText: string) => Promise<void> }[] = [];
   const timers = new Map<number, () => void>();
   let timerId = 0;
   const windowListeners: Record<string, () => void> = {};
@@ -139,6 +139,11 @@ async function pageScript(search: string) {
           url,
           answer: async (body) => {
             resolve({ ok: true, json: async () => body });
+            await settle();
+          },
+          /** An answer with no JSON in it, such as a proxy's or an empty one. */
+          fail: async (status, statusText) => {
+            resolve({ ok: false, status, statusText, json: async () => { throw new SyntaxError('Unexpected end of JSON input'); } });
             await settle();
           },
         });
@@ -291,6 +296,45 @@ test('errors: the same messages as the CLI, with status 400', async () => {
     text: JSON.stringify({ error: 'Type a GitHub URL or a directory' }),
   });
   assert.equal((await get('/no-such-page')).status, 404);
+});
+
+test('a long input, 1,500 emoji (18 KB encoded): the CLI message, status 400; reloaded, the page', async () => {
+  const input = '😀'.repeat(1500);
+  assert.ok(encodeURIComponent(input).length > 16 * 1024, "longer than Node's default header limit");
+  assert.deepEqual(await scanOf(input), { status: 400, body: { error: `Not a GitHub URL or a readable directory: ${input}` } });
+  const reloaded = await get(`/?repository=${encodeURIComponent(input)}`);
+  assert.equal(reloaded.status, 200);
+  assert.match(reloaded.text, /<input name="repository"/);
+});
+
+test('an address over 1 MiB: status 431 and the page, the field with it; the server goes on', async () => {
+  for (const path of [`/?repository=${'x'.repeat(MAX_ADDRESS)}`, `/api/scan?repository=${'x'.repeat(MAX_ADDRESS)}`]) {
+    const answered = await get(path);
+    assert.equal(answered.status, 431);
+    assert.equal(answered.type, 'text/html; charset=utf-8');
+    assert.match(answered.text, /<input name="repository"/);
+  }
+  assert.equal((await get('/')).status, 200);
+});
+
+test('the page: an input too long for the server to read → Too long to be a repository, in the error colour, nothing asked', async () => {
+  const input = 'x'.repeat(MAX_INPUT + 1);
+  const page = await pageScript('?repository=' + input);
+  assert.equal(page.fetches.length, 0);
+  assert.equal(page.status.textContent, TOO_LONG);
+  assert.equal(page.status.className, 'error');
+  assert.equal(page.button.disabled, false);
+  // The longest it asks for, the server reads.
+  const longest = 'x'.repeat(MAX_INPUT);
+  assert.equal((await scanOf(longest)).body.error, `Not a GitHub URL or a readable directory: ${longest}`);
+});
+
+test('the page: an answer that is not JSON is said as such, in the error colour, not as an unreachable server', async () => {
+  const page = await pageScript('?repository=' + encodeURIComponent('/nope'));
+  await page.fetches[0].fail(431, 'Request Header Fields Too Large');
+  assert.equal(page.status.textContent, 'The Skill Atlas server answered 431 Request Header Fields Too Large, not a scan');
+  assert.equal(page.status.className, 'error');
+  assert.equal(page.button.disabled, false);
 });
 
 test('skill-atlas serve: prints its address, serves the page and scans, stores nothing', async (t) => {

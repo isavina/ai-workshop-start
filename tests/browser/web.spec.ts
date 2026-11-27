@@ -75,3 +75,28 @@ test('a filter: only the matches, marked; N of M skills; kept in the address', a
   await page.getByLabel('Filter skills').press('Escape');
   await expect(page.getByRole('status')).toHaveText('fixture · 5 skills');
 });
+
+test('a long input, 1,500 emoji: the CLI message, in the error colour; reloaded, the field and the message', async ({ page }) => {
+  const input = '😀'.repeat(1500);
+  const message = `Not a GitHub URL or a readable directory: ${input}`;
+  await page.goto('/');
+  await scan(page, input);
+  await expect(page.getByRole('status')).toHaveText(message);
+  await expect(page.getByRole('status')).toHaveClass('error');
+  await page.reload();
+  await expect(page.getByLabel('Repository')).toHaveValue(input);
+  await expect(page.getByRole('status')).toHaveText(message);
+  await expect(page.getByRole('status')).toHaveClass('error');
+});
+
+test('an input too long for an address: a message, in the error colour; reloaded, the field and the message', async ({ page }) => {
+  const input = 'x'.repeat(1024 * 1024);
+  await page.goto('/');
+  await page.getByLabel('Repository').fill(input);
+  await page.getByRole('button', { name: 'Scan' }).click();
+  await expect(page.getByRole('status')).toHaveText('Too long to be a repository: paste a GitHub URL or a directory');
+  await expect(page.getByRole('status')).toHaveClass('error');
+  await page.reload();
+  await expect(page.getByLabel('Repository')).toHaveValue(input);
+  await expect(page.getByRole('status')).toHaveText('Too long to be a repository: paste a GitHub URL or a directory');
+});

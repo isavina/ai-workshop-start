@@ -1,6 +1,7 @@
 // The local web view: a field for a repository or an owner, its skills and their SKILL.md. A Node
 // server on this machine only; each scan is done when asked, and nothing is stored.
 import { createServer, type Server } from 'node:http';
+import type { Socket } from 'node:net';
 import { AtlasError } from './core/errors.ts';
 import { isFilter, skillFilter } from './core/filter.ts';
 import { skillLink, type Repository, type Skill } from './core/model.ts';
@@ -18,7 +19,8 @@ export type WebOptions = {
  * adds `total`, the skills before filtering.
  */
 export function createWebServer({ open }: WebOptions): Server {
-  return createServer(async (request, response) => {
+  // Node's default, 16 KiB, turns away a long input, such as 1,500 emoji, before it reaches the scan.
+  const server = createServer({ maxHeaderSize: MAX_ADDRESS }, async (request, response) => {
     const url = new URL(request.url ?? '/', 'http://localhost');
     const send = (status: number, type: string, body: string) => {
       response.writeHead(status, { 'Content-Type': `${type}; charset=utf-8`, 'Cache-Control': 'no-store' });
@@ -67,7 +69,24 @@ export function createWebServer({ open }: WebOptions): Server {
       json(500, { error: `Unexpected error: ${error instanceof Error ? error.message : String(error)}` });
     }
   });
+  server.on('clientError', (error: NodeJS.ErrnoException, socket: Socket) => {
+    if (error.code === 'ECONNRESET' || !socket.writable) return socket.destroy();
+    if (error.code !== 'HPE_HEADER_OVERFLOW') return socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n');
+    // Longer than any address the server reads, so not even its path is known: the page, which never
+    // asks for so long an input, loads with the field and says why.
+    socket.end(
+      `HTTP/1.1 431 Request Header Fields Too Large\r\nContent-Type: text/html; charset=utf-8\r\n` +
+        `Content-Length: ${Buffer.byteLength(PAGE)}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n${PAGE}`,
+    );
+  });
+  return server;
 }
+
+/** The longest request line and headers the server reads: 1 MiB, far more than a repository needs. */
+export const MAX_ADDRESS = 1024 * 1024;
+/** The longest input the page asks the server for, %-encoded: 1 MiB less room for the headers. */
+export const MAX_INPUT = MAX_ADDRESS - 64 * 1024;
+export const TOO_LONG = 'Too long to be a repository: paste a GitHub URL or a directory';
 
 function repositoryJson({ id, url, commit }: Repository) {
   return { id, url, commit };
@@ -230,6 +249,9 @@ let current;
 /** The same filter as the CLI's --filter and the API's q: src/core/filter.ts. */
 const skillFilter = ${String(skillFilter)};
 const isFilter = ${String(isFilter)};
+/** Longer, the server could not read the request: src/web.ts. */
+const MAX_INPUT = ${MAX_INPUT};
+const TOO_LONG = ${JSON.stringify(TOO_LONG)};
 
 function element(tag, properties = {}, ...children) {
   const node = Object.assign(document.createElement(tag), properties);
@@ -290,9 +312,12 @@ async function load(repository, selected) {
   main.hidden = true;
   current = undefined;
   try {
+    if (encodeURIComponent(repository).length > MAX_INPUT) return say(TOO_LONG, true);
     const response = await fetch('/api/scan?repository=' + encodeURIComponent(repository));
-    const result = await response.json();
+    // Not JSON: the server answered, with something other than a scan.
+    const result = await response.json().catch(() => undefined);
     if (mine !== loading) return;
+    if (!result) return say('The Skill Atlas server answered ' + response.status + ' ' + response.statusText + ', not a scan', true);
     if (!response.ok) return say(result.error, true);
     show(repository, result, selected);
   } catch (error) {
