@@ -45,7 +45,8 @@ above the skills narrows them as you type, and `/` jumps to it. Paste
 [A short demo](docs/demo/organization-scan.mp4) of an organization scan.
 [A 20-second tour](docs/demo/web-view.mp4) of the web view, with English subtitles
 ([web-view.en.srt](docs/demo/web-view.en.srt)): an organization scan, the filter, an error, and this
-repository's automation skills (issue to pull request, code review, address review) and their Slack posts.
+repository's automation skills as Air automations (code review, address review, issue to pull request,
+QA, status update) and their Slack posts.
 
 ## What counts as a skill
 

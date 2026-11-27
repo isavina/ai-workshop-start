@@ -19,9 +19,9 @@ Filter by text: instant, no new scan, matches highlighted
 Error handling: a clear message, never a partial result
 
 6
-00:00:12,096 --> 00:00:16,504
-Our automations: issue to PR, code review, address review
+00:00:12,096 --> 00:00:15,950
+Air automations for this project: code review, address review, issue to PR, QA, status update
 
 7
-00:00:16,554 --> 00:00:19,950
-Slack: questions and status updates go to #is-test-air-bot
+00:00:16,000 --> 00:00:19,950
+Slack: the bot asks questions on issues and posts status updates to #is-test-air-bot
