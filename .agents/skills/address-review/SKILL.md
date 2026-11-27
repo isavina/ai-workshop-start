@@ -147,9 +147,11 @@ $ jq -n --arg text "$MESSAGE" '{channel: "#is-test-air-bot", text: $text}' \
 `channel` and `ts`: they name the thread.
 
 Then wait for a reply **in that thread**: read it every two minutes, for up to 30 minutes from the
-first message. `after` is the `ts` of the last message handled: at first the message's own `ts`, then
-the agent's latest note or question in the thread. The replies to follow: from a reviewer, newer than
-`after`, plain or also sent to the channel (`thread_broadcast`), without bots and other subtypes:
+first message. `after` is the `ts` of the last reviewer reply handled: at first the message's own
+`ts`. The agent's own notes and questions do not move it: a reviewer may send a second reply before the
+agent's note, and that reply must still come back (the agent's messages are dropped as bots anyway).
+The replies to follow: from a reviewer, newer than `after`, plain or also sent to the channel
+(`thread_broadcast`), without bots and other subtypes:
 
 ```console
 $ curl -s -G https://slack.com/api/conversations.replies -H "Authorization: Bearer $SLACK_TOKEN" \
@@ -161,11 +163,12 @@ $ curl -s -G https://slack.com/api/conversations.replies -H "Authorization: Bear
       | {user, ts, text}'
 ```
 
-Follow the first one; each message the agent posts in the thread becomes the new `after`:
+Follow them one at a time, oldest first: each reply handled becomes the new `after`, and the thread
+is read again right away, before waiting, so a reply sent meanwhile is not skipped:
 
 - More to change in this pull request → steps 2–5 again, then say in the thread what was done
   (`chat.postMessage` with `thread_ts: <ts>`), and wait again.
-- Looks good, or nothing to do → go on to step 7.
+- Looks good, or nothing to do → go on to step 7, once a read returns no newer reply.
 - Unclear → ask once in the thread, and wait again. Still unclear → say in the thread that nothing
   more is done, and go on.
 - Outside this pull request, or against these skills (merge, rebase, force-push, delete a branch,
