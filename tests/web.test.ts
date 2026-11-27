@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { createWebServer, listen } from '../src/web.ts';
-import { atlas, CLI, EXAMPLE_COMMIT, FIXTURE, opener } from './helpers.ts';
+import { aliasBomb, atlas, CLI, EXAMPLE_COMMIT, FIXTURE, opener } from './helpers.ts';
 
 const server = createWebServer({ open: opener() });
 const address = await listen(server, 0);
@@ -273,6 +273,19 @@ test('a directory: the same skills, order, copies and warnings as the CLI; each 
     assert.equal(skill.text, readFileSync(join(FIXTURE, skill.path), 'utf8'), skill.path);
   }
   assert.deepEqual(body.skills.find((skill: { name: string }) => skill.name === 'commits').copies, ['.github/skills/commits/SKILL.md']);
+  assert.equal(body.warnings.map((warning: string) => `warning: ${warning}`).join('\n'), cli.stderr);
+});
+
+test('a SKILL.md with too many YAML aliases: a warning on the page, the other skills still listed', async (t) => {
+  const directory = aliasBomb();
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const cli = await atlas(['scan', directory]);
+  const { status, body } = await scanOf(directory);
+  assert.equal(status, 200);
+  assert.deepEqual(body.skills.map((skill: { name: string }) => skill.name), ['fine', 'laughs']);
+  assert.deepEqual(body.warnings, [
+    '.agents/skills/laughs/SKILL.md: malformed front matter: Excessive alias count indicates a resource exhaustion attack; using the directory name',
+  ]);
   assert.equal(body.warnings.map((warning: string) => `warning: ${warning}`).join('\n'), cli.stderr);
 });
 
