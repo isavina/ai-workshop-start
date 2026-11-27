@@ -1,21 +1,21 @@
 1
-00:00:01,750 --> 00:00:04,921
+00:00:02,550 --> 00:00:05,465
 Paste an organization, and Skill Atlas finds every skill in it
 
 2
-00:00:05,021 --> 00:00:06,367
+00:00:05,565 --> 00:00:06,810
 Grouped by repository, with a heads-up for broken files
 
 3
-00:00:06,467 --> 00:00:07,735
+00:00:06,910 --> 00:00:08,082
 Type to filter — matches light up instantly
 
 4
-00:00:07,835 --> 00:00:09,650
+00:00:08,182 --> 00:00:09,850
 A typo? You get a clear message, not a broken page
 
 5
-00:00:09,750 --> 00:00:11,950
+00:00:09,950 --> 00:00:11,950
 Every task starts as an issue labelled “Delegated to AI” —
 from you, or from the Red Agent hunting bugs
 
