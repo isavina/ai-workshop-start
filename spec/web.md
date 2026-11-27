@@ -23,6 +23,16 @@ A **filter field** above the skills: the [same filter as `--filter`](cli.md#filt
 - While it scans, the page says so, with the seconds so far
 - A new scan, asked or by going back, replaces one still running: only the latest shows its progress and result
   - Going back to the bare page, with no `?repository`, drops it: an empty page, nothing scanning
+## Cluster
+A **Cluster** button next to the filter field: the skills shown, grouped by topic, the [same clustering as `--cluster`](cli.md#cluster)
+- On the scan already done: it *never scans again*; it asks `claude -p` once, through `POST /api/cluster`
+- Clusters by label, `Other` last; each `<label> · N skills`, its skills by name; on an organization, each skill with its repository
+- The total says ` · K clusters`; the button is pressed; again → the plain list
+- While it clusters, the button says so and waits; a new scan or a filter change drops an answer still coming
+- The filtered skills only; changing the filter drops the clusters: the plain, filtered list
+- Fewer than 2 skills shown → the button is disabled
+- An error (no `claude`, failing, invalid, 2 minutes) → the message, in the error colour; the plain list stays
+- The address keeps `&cluster=1`: a clustered view can be linked and reloaded (scanned, filtered, then clustered)
 ## Organization
 `github.com/<owner>`, an organization or a user: the [same scan as the CLI](analysis.md#organization)
 - Every public repository at its default branch; no forks, archived or empty repositories
@@ -43,6 +53,13 @@ no words to filter by → as without `q`. The page asks for the whole scan and f
 
 `GET /api/scan?repository=github.com/<owner>` → `{ owner: { name, url }, scanned, repositories, warnings }`;
 each of `repositories`, with skills only: `{ repository, skills }`, as above
+
+`POST /api/cluster` with `{ skills: [{ id, name, description }] }` → `{ clusters: [{ label, skills: [<id>] }] }`,
+sorted, `Other` last; fewer than 2 skills → `{ clusters: [] }`, Claude not asked; a malformed body, or what
+`--cluster` would exit 1 for → status 400, `{ error }`
+- It runs the user's `claude`: only for the page. Not JSON → 415; an `Origin` or `Host` other than
+  `localhost` or `127.0.0.1` → 403 (another site, a rebound domain); Claude not asked
+- More than 10 MB → status 400, a clear message; the page gone before the answer → `claude -p` is stopped
 ## Look
 How the page looks is part of what it does: a real browser compares it, pixel for pixel, with a
 baseline screenshot (`tests/browser/screenshots/`), 1280×800, light and dark
@@ -53,5 +70,6 @@ baseline screenshot (`tests/browser/screenshots/`), 1280×800, light and dark
 - An error, in the error colour
 - The same scan in dark mode
 - A filtered scan, after a reload: `N of M skills`, the matches marked
+- A clustered scan, after a reload: `K clusters`, the skills grouped under their labels
 
 Every browser test is recorded as a video, kept whether it passes or fails

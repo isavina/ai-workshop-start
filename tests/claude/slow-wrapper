@@ -1,0 +1,4 @@
+#!/bin/sh
+# A wrapper without exec, as npx or a shim: the slow fake claude -p runs as its child.
+node "$(dirname "$0")/fake-claude.ts" slow
+echo done

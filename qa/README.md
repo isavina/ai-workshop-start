@@ -15,6 +15,7 @@ what you see with **Expected**. A step that differs is a failure; write down wha
 | [QA-4 Organization](qa-4-organization.md) | `scan github.com/<owner>`, filtered too | network, `GITHUB_TOKEN` |
 | [QA-5 Web view](qa-5-web-view.md) | `serve`: the page, a scan, a skill, the address, the filter, the look | browser |
 | [QA-6 Web view, organization](qa-6-web-organization.md) | an owner on the page, filtered too | browser, `GITHUB_TOKEN` |
+| [QA-7 Clusters](qa-7-cluster.md) | `--cluster` and the **Cluster** button, by `claude -p` | `claude`, browser |
 
 ## Before you start
 

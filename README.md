@@ -24,6 +24,7 @@ $ ./skill-atlas scan github.com/JetBrains/MPS/tree/<branch, tag or commit>
 $ ./skill-atlas scan ~/projects/my-repository                       # a local checkout
 $ GITHUB_TOKEN=$(gh auth token) ./skill-atlas scan github.com/JetBrains   # every repository of an organization
 $ ./skill-atlas scan github.com/JetBrains/MPS --filter review        # only the skills about review
+$ ./skill-atlas scan github.com/JetBrains/MPS --cluster              # grouped by topic, by claude -p
 ```
 
 - Skills are sorted by name; each shows its description's first sentence and a link pinned to the
@@ -32,6 +33,10 @@ $ ./skill-atlas scan github.com/JetBrains/MPS --filter review        # only the 
 - `--filter <words>` keeps the skills with all of these words, or words starting with them, in
   their names and descriptions: `code review`, `code-review` and `Code_Review` are the same
   ([spec/cli.md](spec/cli.md#filter)).
+- `--cluster` groups the skills by topic or purpose: [Claude Code](https://code.claude.com)'s `claude -p`
+  picks 2 to 8 clusters from their names and descriptions, nothing else; its answer is checked, and a
+  failure is a clear message, exit code 1. `SKILL_ATLAS_CLAUDE` runs another command instead of `claude`
+  ([spec/cli.md](spec/cli.md#cluster)).
 - An organization or a user: every repository but forks and archived ones, at its default branch;
   only those with skills are printed, after a total ([spec/analysis.md](spec/analysis.md#organization)).
 - GitHub allows 60 requests an hour without a token. Set `GITHUB_TOKEN` for more, for example
@@ -39,7 +44,7 @@ $ ./skill-atlas scan github.com/JetBrains/MPS --filter review        # only the 
 
 Or in the browser: `./skill-atlas serve` opens a local web view at http://localhost:4173, with a field
 for a repository, its skills and each one's SKILL.md ([spec/web.md](spec/web.md)); a filter field
-above the skills narrows them as you type, and `/` jumps to it. Paste
+above the skills narrows them as you type, and `/` jumps to it. **Cluster**, next to it, groups the skills shown by topic, with `claude -p`. Paste
 `https://github.com/JetBrains` there for a whole organization, grouped by repository; start it with
 `GITHUB_TOKEN=$(gh auth token) ./skill-atlas serve` for that.
 [A short demo](docs/demo/organization-scan.mp4) of an organization scan.
