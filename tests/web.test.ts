@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { createWebServer, listen } from '../src/web.ts';
-import { atlas, CLI, EXAMPLE_COMMIT, FIXTURE, opener } from './helpers.ts';
+import { atlas, CLI, EXAMPLE_COMMIT, FIXTURE, opener, UNPRIVILEGED, withUnreadableSubdirectory } from './helpers.ts';
 
 const server = createWebServer({ open: opener() });
 const address = await listen(server, 0);
@@ -274,6 +274,26 @@ test('a directory: the same skills, order, copies and warnings as the CLI; each 
   }
   assert.deepEqual(body.skills.find((skill: { name: string }) => skill.name === 'commits').copies, ['.github/skills/commits/SKILL.md']);
   assert.equal(body.warnings.map((warning: string) => `warning: ${warning}`).join('\n'), cli.stderr);
+});
+
+test('a directory with an unreadable subdirectory: its skills and a warning, as the CLI', async (t) => {
+  const root = withUnreadableSubdirectory(t);
+  // Its own server, run as a user file permissions apply to, like the CLI it is compared with.
+  const child = spawn(process.execPath, [CLI, 'serve', '0'], UNPRIVILEGED);
+  t.after(() => child.kill());
+  const line = await new Promise<string>((resolve, reject) => {
+    child.stdout.setEncoding('utf8').once('data', resolve);
+    child.once('exit', (code) => reject(new Error(`exited with ${code}`)));
+  });
+  const [, url] = /^Skill Atlas at (http:\/\/localhost:\d+)/.exec(line) ?? [];
+  assert.ok(url, line);
+  const response = await fetch(`${url}/api/scan?repository=${encodeURIComponent(root)}`);
+  const body = (await response.json()) as { skills: { name: string }[]; warnings: string[] };
+  assert.equal(response.status, 200, JSON.stringify(body));
+  assert.deepEqual(body.skills.map((skill) => skill.name), ['ok']);
+  assert.deepEqual(body.warnings, ['private: cannot read this directory; skipped']);
+  const cli = spawnSync(process.execPath, [CLI, 'scan', root], { encoding: 'utf8', ...UNPRIVILEGED });
+  assert.equal(body.warnings.map((warning: string) => `warning: ${warning}\n`).join(''), cli.stderr);
 });
 
 test('errors: the same messages as the CLI, with status 400', async () => {

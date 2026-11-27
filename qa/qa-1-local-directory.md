@@ -79,6 +79,16 @@ skill, copies, and warnings ([spec/analysis.md](../spec/analysis.md#project-skil
    twice, on stderr, exit code 1:
    `Usage: skill-atlas scan <GitHub URL | directory> [--filter <words>]`.
 
-10. `git status --short`
+10. A directory with an unreadable subdirectory, such as another user's Docker volume:
+   ```
+   mkdir -p /tmp/qa-perm/.agents/skills/ok /tmp/qa-perm/private
+   printf -- '---\nname: ok\ndescription: fine\n---\n' > /tmp/qa-perm/.agents/skills/ok/SKILL.md
+   chmod 000 /tmp/qa-perm/private && ./skill-atlas scan /tmp/qa-perm; echo $?
+   chmod 755 /tmp/qa-perm/private && rm -r /tmp/qa-perm
+   ```
+   Expected: `qa-perm · 1 skill`, `ok — fine`, its link, exit code 0, and on stderr
+   `warning: private: cannot read this directory; skipped`. (As root every directory is readable: no warning.)
+
+11. `git status --short`
 
    Expected: nothing new: the scan stored nothing.

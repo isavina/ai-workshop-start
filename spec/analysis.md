@@ -16,6 +16,8 @@ Skill: id = `repo:path`, name, description, commit, the SKILL.md text
 - Malformed front matter → a *warning*, the scan goes on
 - Unreachable repository, or an unknown branch, tag or commit → a clear message, exit code 1
 - An empty repository, without a commit → a clear message, exit code 1
+- A local directory: an unreadable subdirectory → a *warning*, the scan goes on; these warnings in
+  path order; the directory itself unreadable or missing → a clear message, exit code 1
 - Code search (with `GITHUB_TOKEN`) only on the default branch; elsewhere, the tree
 - A tree too large for one answer → only the skill roots at the repository root, and a *warning*
 ## Organization
