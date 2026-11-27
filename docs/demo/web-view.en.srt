@@ -1,35 +1,37 @@
 1
-00:00:01,500 --> 00:00:04,950
-Skill Atlas web view: scan a whole organization, github.com/ndkoval
+00:00:01,750 --> 00:00:04,921
+Paste an organization, and Skill Atlas finds every skill in it
 
 2
-00:00:05,000 --> 00:00:06,329
-Skills grouped by repository; broken front matter shows as a warning
+00:00:05,021 --> 00:00:06,367
+Grouped by repository, with a heads-up for broken files
 
 3
-00:00:06,379 --> 00:00:07,633
-Filter by text: instant, no new scan, matches highlighted
+00:00:06,467 --> 00:00:07,735
+Type to filter — matches light up instantly
 
 4
-00:00:07,683 --> 00:00:09,650
-Error handling: a clear message, never a partial result
+00:00:07,835 --> 00:00:09,650
+A typo? You get a clear message, not a broken page
 
 5
-00:00:09,700 --> 00:00:11,950
-It starts with a GitHub issue labelled "Delegated to AI": yours, or a bug the Red Agent found
+00:00:09,750 --> 00:00:11,950
+Every task starts as an issue labelled “Delegated to AI” —
+from you, or from the Red Agent hunting bugs
 
 6
-00:00:12,000 --> 00:00:14,050
-Air automation "Issue To PR" implements it and opens a pull request…
+00:00:12,050 --> 00:00:14,050
+Air picks it up and opens a pull request…
 
 7
-00:00:14,100 --> 00:00:16,150
-…or first asks for details on Slack, then goes on with the answers
+00:00:14,150 --> 00:00:16,150
+…or asks on Slack first, if something is unclear
 
 8
-00:00:16,200 --> 00:00:18,350
-Then Code Review reviews the PR, Address Review answers, QA tests it on request
+00:00:16,250 --> 00:00:18,350
+Then it reviews the PR, answers the comments,
+and tests it when you ask
 
 9
-00:00:18,400 --> 00:00:19,950
-And a status update in Slack, whenever you ask for one
+00:00:18,450 --> 00:00:19,850
+And whenever you like, a status update lands in Slack
