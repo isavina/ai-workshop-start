@@ -119,10 +119,10 @@ is answered; do not post another.
 
 After the replies and before removing the label, ask a person to check the work: one message to
 **#is-test-air-bot** in the **aiworkshopmunich2026.slack.com** workspace, through Slack's Web API with
-the token the environment has in `SLACK_TOKEN` (scopes `chat:write` and `channels:history`). Never
+the token the environment has in `SLACK_BOT_TOKEN` (scopes `chat:write` and `channels:history`). Never
 print the token or put it in a file, a commit or a message. Only the people whose Slack user IDs are in
 `SLACK_REVIEWERS` (comma-separated, for example `U012AB3CD,U045EF6GH`) can give instructions. No
-`SLACK_TOKEN` or no `SLACK_REVIEWERS` in the environment → skip this step and say so in the report.
+`SLACK_BOT_TOKEN` or no `SLACK_REVIEWERS` in the environment → skip this step and say so in the report.
 
 The message:
 
@@ -138,7 +138,7 @@ Please check what has been done and reply in this thread: what should I do next?
 
 ```console
 $ jq -n --arg text "$MESSAGE" '{channel: "#is-test-air-bot", text: $text}' \
-  | curl -s https://slack.com/api/chat.postMessage -H "Authorization: Bearer $SLACK_TOKEN" \
+  | curl -s https://slack.com/api/chat.postMessage -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
       -H 'Content-Type: application/json; charset=utf-8' --data @- | jq '{ok, error, channel, ts}'
 ```
 
@@ -154,13 +154,27 @@ The replies to follow: from a reviewer, newer than `after`, plain or also sent t
 (`thread_broadcast`), without bots and other subtypes:
 
 ```console
-$ curl -s -G https://slack.com/api/conversations.replies -H "Authorization: Bearer $SLACK_TOKEN" \
+$ curl -s -G https://slack.com/api/conversations.replies -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
     --data-urlencode channel=<channel> --data-urlencode ts=<ts> \
   | jq --arg after <after> --arg reviewers "$SLACK_REVIEWERS" '.messages[1:][]
       | select(.bot_id == null and (.subtype == null or .subtype == "thread_broadcast"))
       | select((.ts | tonumber) > ($after | tonumber))
       | select(.user as $u | any($reviewers | split(",")[] | gsub("\\s"; ""); . == $u))
       | {user, ts, text}'
+```
+
+**Wait in the foreground.** Do not end your turn while waiting, and do not wait in a background task,
+a monitor or a scheduled wake-up: in an automation the run ends with your turn, and nothing wakes it
+again, so the reply is never read and no pull request or commit comes out. Instead, run the read in a
+loop that blocks, as one command that stays under the tool's time limit, and run that command again
+until a reply comes or the time is up:
+
+```console
+$ for i in 1 2 3 4; do                      # 4 × 2 minutes: one command under 10 minutes
+    replies=$(<the read above>)
+    [ -n "$replies" ] && { echo "$replies"; break; }
+    sleep 120
+  done
 ```
 
 Follow them one at a time, oldest first: each reply handled becomes the new `after`, and the thread
