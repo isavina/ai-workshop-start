@@ -77,7 +77,7 @@ test('scan: --filter without words, an unknown option or two inputs → the usag
   for (const args of [[FIXTURE, '--filter'], [FIXTURE, '--filtre', 'x'], [FIXTURE, FIXTURE], [FIXTURE, '--filter', 'a', '--filter', 'b'], []]) {
     const wrong = await atlas(['scan', ...args]);
     assert.equal(wrong.code, 1, args.join(' '));
-    assert.equal(wrong.stderr, 'Usage: skill-atlas scan <GitHub URL | directory> [--filter <words>]');
+    assert.equal(wrong.stderr, 'Usage: skill-atlas scan <GitHub URL | directory> [--filter <words>] [--cluster]');
   }
 });
 

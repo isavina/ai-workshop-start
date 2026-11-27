@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { replay, type Recording } from '../src/core/replay.ts';
 import { createWebServer, listen } from '../src/web.ts';
-import { atlas, EXAMPLE_COMMIT, opener } from './helpers.ts';
+import { atlas, EXAMPLE_COMMIT, FAKE_CLAUDE, opener } from './helpers.ts';
 
 const API = 'https://api.github.com';
 const RAW = 'https://raw.githubusercontent.com';
@@ -284,4 +284,52 @@ test('the web view: an organization, filtered by &q=: the same skills as --filte
 
   const none = await webScan('github.com/Acme', { github: replay(ACME), q: 'nothing' });
   assert.deepEqual([none.body.total, none.body.repositories], [4, []]);
+});
+
+test('an organization, clustered: all its skills together, each with its repository; sorted by name, then repository', async () => {
+  const acme = await atlas(['scan', 'github.com/Acme', '--cluster'], { github: replay(ACME), claude: FAKE_CLAUDE.topics });
+  assert.equal(acme.code, 0, acme.stderr);
+  assert.equal(
+    acme.stdout,
+    [
+      'Acme · 4 skills in 3 of 6 repositories · 3 clusters',
+      '',
+      'Build and release · 2 skills',
+      'Acme/Alpha · build — The build skill.',
+      blob('Acme/Alpha', 'web/.claude/skills/build/SKILL.md'),
+      'Acme/zeta · deploy — The deploy skill.',
+      blob('Acme/zeta', '.claude/skills/deploy/SKILL.md'),
+      '  also in .github/skills/deploy/SKILL.md',
+      '',
+      'Code and commits · 1 skill',
+      'Acme/Alpha · review — The review skill.',
+      blob('Acme/Alpha', '.agents/skills/review/SKILL.md'),
+      '',
+      'Other · 1 skill',
+      'Acme/broken · plain',
+      blob('Acme/broken', '.claude/skills/plain/SKILL.md'),
+    ].join('\n'),
+  );
+  // The warnings are the scan's.
+  assert.equal(acme.stderr, (await atlas(['scan', 'github.com/Acme'], { github: replay(ACME) })).stderr);
+
+  // Filtered first: only the matching skills, in the header too.
+  const asked: string[] = [];
+  const filtered = await atlas(['scan', 'github.com/Acme', '--filter', 'the', '--cluster'], {
+    github: replay(ACME),
+    claude: async (prompt) => {
+      asked.push(prompt);
+      return JSON.stringify({ clusters: [{ label: 'Ship', skills: [1, 3] }, { label: 'Look', skills: [2] }] });
+    },
+  });
+  assert.equal(filtered.code, 0, filtered.stderr);
+  assert.deepEqual([...asked[0].matchAll(/^\d+\. (\S+)/gm)].map(([, name]) => name), ['build', 'review', 'deploy']);
+  assert.deepEqual(filtered.stdout.split('\n').filter((line) => line && !line.startsWith('  ')), [
+    'Acme · 3 of 4 skills in 2 of 6 repositories · 2 clusters',
+    'Look · 1 skill',
+    'Acme/Alpha · review — The review skill.',
+    'Ship · 2 skills',
+    'Acme/Alpha · build — The build skill.',
+    'Acme/zeta · deploy — The deploy skill.',
+  ]);
 });

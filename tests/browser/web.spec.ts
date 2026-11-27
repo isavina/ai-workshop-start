@@ -75,3 +75,20 @@ test('a filter: only the matches, marked; N of M skills; kept in the address', a
   await page.getByLabel('Filter skills').press('Escape');
   await expect(page.getByRole('status')).toHaveText('fixture · 5 skills');
 });
+
+test('clusters: the skills grouped by topic, by claude -p; K clusters; kept in the address', async ({ page }) => {
+  await page.goto('/?repository=fixture');
+  await page.getByRole('button', { name: 'Cluster' }).click();
+  await expect(page.getByRole('status')).toHaveText('fixture · 5 skills · 3 clusters');
+  await expect(page.locator('#skills .cluster')).toHaveText(['Build and release2 skills', 'Code and commits2 skills', 'Other1 skill']);
+  await expect(page.locator('#skills .name')).toHaveText(['build', 'release-checklist', 'code-style', 'commits', 'plain']);
+  await expect(page.getByRole('button', { name: 'Cluster' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page).toHaveURL(/[?&]cluster=1/);
+  await page.reload();
+  await expect(page.getByRole('status')).toHaveText('fixture · 5 skills · 3 clusters');
+  await expect(page.locator('#skill h2')).toHaveText('build');
+  await expect(page).toHaveScreenshot('clustered.png');
+  await page.getByRole('button', { name: 'Cluster' }).click();
+  await expect(page.getByRole('status')).toHaveText('fixture · 5 skills');
+  await expect(page).not.toHaveURL(/cluster=1/);
+});

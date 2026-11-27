@@ -1,6 +1,7 @@
 // The local web view: a field for a repository or an owner, its skills and their SKILL.md. A Node
 // server on this machine only; each scan is done when asked, and nothing is stored.
-import { createServer, type Server } from 'node:http';
+import { createServer, type IncomingMessage, type Server } from 'node:http';
+import { clusterSkills, type Ask } from './core/cluster.ts';
 import { AtlasError } from './core/errors.ts';
 import { isFilter, skillFilter } from './core/filter.ts';
 import { skillLink, type Repository, type Skill } from './core/model.ts';
@@ -9,15 +10,18 @@ import { isOwner, scan, scanOwner, type Owner, type Source } from './core/scan.t
 export type WebOptions = {
   /** Opens what the user typed into the field, as `scan` does. */
   open(input: string): Promise<Source | Owner>;
+  /** Claude, for `POST /api/cluster`: `claude -p`. */
+  cluster?: Ask;
 };
 
 /**
  * `GET /`: the page. `GET /api/scan?repository=<GitHub URL | directory | github.com/<owner>>`: the
  * scan as JSON, an owner's grouped by repository, or `{ error }` with status 400 for what the CLI
  * would explain and exit 1 for. `&q=<words>` keeps only the skills matching them, as `--filter` does, and
- * adds `total`, the skills before filtering.
+ * adds `total`, the skills before filtering. `POST /api/cluster` with `{ skills: [{ id, name, description }] }`:
+ * the clusters, `{ clusters: [{ label, skills: [<id>] }] }`, as `--cluster` makes them.
  */
-export function createWebServer({ open }: WebOptions): Server {
+export function createWebServer({ open, cluster }: WebOptions): Server {
   return createServer(async (request, response) => {
     const url = new URL(request.url ?? '/', 'http://localhost');
     const send = (status: number, type: string, body: string) => {
@@ -26,6 +30,27 @@ export function createWebServer({ open }: WebOptions): Server {
     };
     const json = (status: number, body: unknown) => send(status, 'application/json', JSON.stringify(body));
 
+    if (url.pathname === '/api/cluster') {
+      if (request.method !== 'POST') return json(405, { error: 'Only POST' });
+      // It runs the user's claude -p: only for this page. Another site's form or text/plain fetch has no
+      // preflight, so JSON only, and from this machine's own address, not a rebound domain.
+      if (!fromThisPage(request)) return json(403, { error: 'Only from the Skill Atlas page' });
+      if (!/^application\/json\b/i.test(request.headers['content-type'] ?? '')) {
+        return json(415, { error: 'Send JSON: Content-Type: application/json' });
+      }
+      // The page gone, or its answer dropped: claude -p is stopped.
+      const stop = new AbortController();
+      response.once('close', () => stop.abort());
+      try {
+        const skills = clusterRequest(await body(request));
+        if (!cluster) throw new AtlasError('Clustering needs claude -p: start skill-atlas serve from the command line');
+        const clusters = await clusterSkills(skills, cluster, stop.signal);
+        return json(200, { clusters: clusters.map(({ label, skills }) => ({ label, skills: skills.map((skill) => skill.id) })) });
+      } catch (error) {
+        if (error instanceof AtlasError) return json(400, { error: error.message });
+        return json(500, { error: `Unexpected error: ${error instanceof Error ? error.message : String(error)}` });
+      }
+    }
     if (request.method !== 'GET') return json(405, { error: 'Only GET' });
     if (url.pathname === '/') return send(200, 'text/html', PAGE);
     if (url.pathname !== '/api/scan') return json(404, { error: `Not found: ${url.pathname}` });
@@ -66,6 +91,61 @@ export function createWebServer({ open }: WebOptions): Server {
       if (error instanceof AtlasError) return json(400, { error: error.message });
       json(500, { error: `Unexpected error: ${error instanceof Error ? error.message : String(error)}` });
     }
+  });
+}
+
+/** The most a cluster request may send: far more than an organization's names and descriptions. */
+const MAX_BODY = 10 * 1024 * 1024;
+
+/**
+ * Whether the request is the page's own: it names this machine, `localhost` or `127.0.0.1`, and comes
+ * from this server's address, port included; another local server's page is not this one.
+ */
+function fromThisPage(request: IncomingMessage): boolean {
+  const parse = (url: string) => {
+    try {
+      return new URL(url);
+    } catch {
+      return undefined;
+    }
+  };
+  const self = request.headers.host === undefined ? undefined : parse(`http://${request.headers.host}`);
+  if (!self || !['localhost', '127.0.0.1'].includes(self.hostname)) return false;
+  const origin = request.headers.origin;
+  return origin === undefined || parse(origin)?.origin === self.origin;
+}
+
+/** The request's body, up to MAX_BODY; the rest is read and dropped, so the 400 still reaches the page. */
+function body(request: IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    request.on('data', (chunk: Buffer) => {
+      size += chunk.length;
+      if (size <= MAX_BODY) chunks.push(chunk);
+    });
+    request.on('end', () => (size > MAX_BODY ? reject(new AtlasError('Too many skills to cluster at once')) : resolve(Buffer.concat(chunks).toString('utf8'))));
+    request.on('error', reject);
+  });
+}
+
+/** `{ skills: [{ id, name, description }] }`, each id once; anything else → an `AtlasError`. */
+function clusterRequest(text: string): { id: string; name: string; description: string }[] {
+  const malformed = new AtlasError('Send the skills to cluster: { "skills": [{ "id", "name", "description" }] }');
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw malformed;
+  }
+  const skills = (parsed as { skills?: unknown } | null)?.skills;
+  if (!Array.isArray(skills)) throw malformed;
+  const ids = new Set<string>();
+  return skills.map((skill: { id?: unknown; name?: unknown; description?: unknown } | null) => {
+    const { id, name, description } = skill ?? {};
+    if (typeof id !== 'string' || typeof name !== 'string' || typeof description !== 'string' || ids.has(id)) throw malformed;
+    ids.add(id);
+    return { id, name, description };
   });
 }
 
@@ -153,23 +233,28 @@ const PAGE = String.raw`<!doctype html>
   main[hidden] { display: none; }
   aside, #skill { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); }
   aside { position: sticky; top: 16px; display: flex; flex-direction: column; max-height: calc(100vh - 32px); overflow: hidden; }
-  .filter { position: relative; padding: 10px; border-bottom: 1px solid var(--border); }
-  .filter svg { position: absolute; left: 22px; top: 50%; transform: translateY(-50%); color: var(--faint); pointer-events: none; }
+  .filter { display: flex; gap: 8px; padding: 10px; border-bottom: 1px solid var(--border); }
+  .search { position: relative; flex: 1; min-width: 0; }
+  .filter svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--faint); pointer-events: none; }
   #filter { width: 100%; padding: 7px 34px 7px 34px; background: var(--sunken); border: 1px solid transparent; border-radius: 8px; outline: none; }
   #filter:focus { background: var(--surface); border-color: var(--accent); }
   #filter::placeholder { color: var(--faint); }
   #filter::-webkit-search-cancel-button { display: none; }
-  .filter kbd { position: absolute; right: 20px; top: 50%; transform: translateY(-50%); padding: 0 6px; font-size: 11px; line-height: 18px; color: var(--faint); border: 1px solid var(--border); border-radius: 5px; pointer-events: none; }
+  .filter kbd { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); padding: 0 6px; font-size: 11px; line-height: 18px; color: var(--faint); border: 1px solid var(--border); border-radius: 5px; pointer-events: none; }
   #filter:focus + kbd, #filter:not(:placeholder-shown) + kbd { display: none; }
+  #cluster { padding: 0 12px; font-size: 12.5px; font-weight: 500; white-space: nowrap; background: var(--sunken); border: 1px solid var(--border); border-radius: 8px; }
+  #cluster:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  #cluster[aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+  #cluster:disabled { opacity: .45; cursor: default; }
   #skills { flex: 1; margin: 0; padding: 6px; list-style: none; overflow: auto; }
   #skills button { display: block; width: 100%; padding: 9px 12px; text-align: left; background: none; border: 0; border-radius: 8px; }
   #skills button:hover { background: var(--sunken); }
   #skills button[aria-current="true"] { background: var(--accent-soft); }
   #skills button[aria-current="true"] .name { color: var(--accent); }
-  #skills .repository { display: flex; justify-content: space-between; gap: 8px; padding: 14px 12px 4px; font-size: 11.5px; font-weight: 600; letter-spacing: .02em; color: var(--muted); overflow-wrap: anywhere; }
-  #skills .repository:first-child { padding-top: 6px; }
+  #skills .repository, #skills .cluster { display: flex; justify-content: space-between; gap: 8px; padding: 14px 12px 4px; font-size: 11.5px; font-weight: 600; letter-spacing: .02em; color: var(--muted); overflow-wrap: anywhere; }
+  #skills .repository:first-child, #skills .cluster:first-child { padding-top: 6px; }
   #skills .repository a { text-decoration: none; }
-  #skills .repository .count { font-weight: 400; color: var(--faint); white-space: nowrap; }
+  #skills .repository .count, #skills .cluster .count { font-weight: 400; color: var(--faint); white-space: nowrap; }
   #skills .empty { padding: 28px 12px; text-align: center; color: var(--muted); font-size: 13px; }
   .name { font-weight: 600; font-size: 13.5px; }
   .description { display: block; margin-top: 1px; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
@@ -206,9 +291,12 @@ const PAGE = String.raw`<!doctype html>
 <main hidden>
   <aside>
     <div class="filter">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-      <input id="filter" type="search" aria-label="Filter skills" placeholder="Filter by name or description" autocomplete="off" spellcheck="false">
-      <kbd>/</kbd>
+      <div class="search">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="filter" type="search" aria-label="Filter skills" placeholder="Filter by name or description" autocomplete="off" spellcheck="false">
+        <kbd>/</kbd>
+      </div>
+      <button id="cluster" type="button" aria-pressed="false" title="Group the skills shown by topic, with claude -p" disabled>Cluster</button>
     </div>
     <ul id="skills"></ul>
   </aside>
@@ -224,7 +312,8 @@ const main = document.querySelector('main');
 const filter = document.getElementById('filter');
 const list = document.getElementById('skills');
 const article = document.getElementById('skill');
-/** The scan shown, and the skill selected in it. */
+const clusterButton = document.getElementById('cluster');
+/** The scan shown, the skill selected in it, and its clusters, if asked for. */
 let current;
 
 /** The same filter as the CLI's --filter and the API's q: src/core/filter.ts. */
@@ -274,9 +363,25 @@ function marked(text) {
 
 /** Counts the scans: only the latest one may show its progress and result, and enable the button. */
 let loading = 0;
+/** Counts the cluster requests: only the latest, for the scan and the filter still shown, may show its answer. */
+let clustering = 0;
+let waitingForClusters = false;
+/** Stops the cluster request still coming: the server then stops its claude -p. */
+let stopClustering;
 
-async function load(repository, selected) {
+/** Back to the plain list; an answer still coming is dropped, and its request stopped. */
+function dropClusters() {
+  clustering++;
+  if (stopClustering) stopClustering.abort();
+  stopClustering = undefined;
+  waitingForClusters = false;
+  clusterButton.textContent = 'Cluster';
+  if (current) current.clusters = undefined;
+}
+
+async function load(repository, selected, clustered = false) {
   const mine = ++loading;
+  dropClusters();
   field.value = repository;
   form.querySelector('button').disabled = true;
   const what = OWNER.test(repository) ? 'every repository of ' + repository : repository;
@@ -295,6 +400,7 @@ async function load(repository, selected) {
     if (mine !== loading) return;
     if (!response.ok) return say(result.error, true);
     show(repository, result, selected);
+    if (clustered) cluster();
   } catch (error) {
     if (mine === loading) say('Cannot reach the Skill Atlas server: ' + error.message, true);
   } finally {
@@ -317,37 +423,64 @@ function show(repository, result, selected) {
   render();
 }
 
-/** The scan shown, filtered: the total, the matching skills, the selected one if it still matches. */
-function render() {
-  const { result, groups, skills, key, owner } = current;
+/** The skills the filter lets through, grouped by repository: only those with a match. */
+function filteredGroups() {
   const typed = words();
   const matches = typed ? skillFilter(typed) : () => true;
-  const shown = groups
+  return current.groups
     .map((group) => ({ ...group, skills: group.skills.filter(matches) }))
     .filter((group) => group.skills.length > 0);
-  const matched = shown.flatMap((group) => group.skills.map((skill) => key(skill)));
+}
+
+/**
+ * The scan shown, filtered: the total, the matching skills, the selected one if it still matches.
+ * Clustered, the same skills under their clusters' labels, each with its repository on an organization.
+ */
+function render() {
+  const { result, groups, skills, key, owner, clusters } = current;
+  const typed = words();
+  const shown = filteredGroups();
+  const byKey = new Map(shown.flatMap((group) => group.skills.map((skill) => [key(skill), { ...skill, repository: group.repository }])));
+  const compare = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+  const sections = clusters
+    ? clusters.map((cluster) => ({
+      cluster,
+      skills: cluster.skills.map((id) => byKey.get(id)).filter(Boolean)
+        .sort((a, b) => compare(a.name, b.name) || compare(a.repository.id, b.repository.id) || compare(a.path, b.path)),
+    }))
+    : shown;
+  const matched = sections.flatMap((section) => section.skills.map((skill) => key(skill)));
   status.replaceChildren(
     owner
       ? element('a', { href: result.owner.url, textContent: result.owner.name })
       : element('a', { href: result.repository.url, textContent: result.repository.id }),
     ' · ' + (typed ? matched.length + ' of ' : '') + count(skills.length, 'skill', 'skills') +
-      (owner ? ' in ' + count(typed ? shown.length : groups.length, 'repository', 'repositories') : ''),
+      (owner ? ' in ' + count(typed ? shown.length : groups.length, 'repository', 'repositories') : '') +
+      (clusters ? ' · ' + count(clusters.length, 'cluster', 'clusters') : ''),
   );
   status.className = '';
+  clusterButton.disabled = waitingForClusters || matched.length < 2;
+  clusterButton.setAttribute('aria-pressed', String(Boolean(clusters)));
   const button = (skill) => element('li', {},
     element('button', { type: 'button', skill: key(skill), onclick: () => select(key(skill)) },
       element('span', { className: 'name' }, ...marked(skill.name)),
       skill.description ? element('span', { className: 'description' }, ...marked(skill.description)) : '',
-      element('span', { className: 'path', textContent: skill.path }),
+      element('span', { className: 'path', textContent: (clusters && owner ? skill.repository.id + ' · ' : '') + skill.path }),
     ),
   );
-  list.replaceChildren(...shown.flatMap((group) => [
-    ...(owner ? [element('li', { className: 'repository' },
-      element('a', { href: group.repository.url, textContent: group.repository.id }),
-      element('span', { className: 'count', textContent: count(group.skills.length, 'skill', 'skills') }),
-    )] : []),
-    ...group.skills.map(button),
-  ]));
+  const heading = (section) =>
+    section.cluster
+      ? [element('li', { className: 'cluster' },
+        element('span', { textContent: section.cluster.label }),
+        element('span', { className: 'count', textContent: count(section.skills.length, 'skill', 'skills') }),
+      )]
+      : owner
+        ? [element('li', { className: 'repository' },
+          element('a', { href: section.repository.url, textContent: section.repository.id }),
+          element('span', { className: 'count', textContent: count(section.skills.length, 'skill', 'skills') }),
+        )]
+        : [];
+  list.replaceChildren(...sections.flatMap((section) => [...heading(section), ...section.skills.map(button)]));
   if (typed && matched.length === 0) list.append(element('li', { className: 'empty', textContent: 'No skill matches "' + typed + '"' }));
   select(matched.includes(current.selected) ? current.selected : matched[0], false);
 }
@@ -371,11 +504,62 @@ function select(selected, remember = true) {
   );
 }
 
-/** ?repository=…&q=…&skill=…: the scan, the filter and the selected skill, as shown. */
+/**
+ * The skills shown, clustered by claude -p on the server; pressed again, the plain list. Only the
+ * latest request, for the scan and the filter still shown, shows its answer or its error.
+ */
+async function cluster() {
+  if (!current) return;
+  if (current.clusters || waitingForClusters) {
+    dropClusters();
+    render();
+    return setAddress('replaceState');
+  }
+  const { key } = current;
+  const skills = filteredGroups().flatMap((group) => group.skills);
+  // Too few to cluster, as after a reload with &cluster=1: the plain list, and its address.
+  if (skills.length < 2) return setAddress('replaceState');
+  const mine = ++clustering;
+  const stop = new AbortController();
+  stopClustering = stop;
+  waitingForClusters = true;
+  clusterButton.disabled = true;
+  clusterButton.textContent = 'Clustering…';
+  const done = () => {
+    stopClustering = undefined;
+    waitingForClusters = false;
+    clusterButton.textContent = 'Cluster';
+  };
+  try {
+    const response = await fetch('/api/cluster', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ skills: skills.map((skill) => ({ id: key(skill), name: skill.name, description: skill.description })) }),
+      signal: stop.signal,
+    });
+    const answer = await response.json();
+    if (mine !== clustering) return;
+    done();
+    if (response.ok && answer.clusters.length > 0) current.clusters = answer.clusters;
+    render();
+    setAddress('replaceState');
+    if (!response.ok) say(answer.error, true);
+  } catch (error) {
+    // Dropped, and so stopped: its AbortError is not shown.
+    if (mine !== clustering) return;
+    done();
+    render();
+    say('Cannot reach the Skill Atlas server: ' + error.message, true);
+  }
+}
+clusterButton.addEventListener('click', () => cluster());
+
+/** ?repository=…&q=…&cluster=1&skill=…: the scan, the filter, the clusters and the selected skill, as shown. */
 function setAddress(how, repository = current.repository, skill = current && current.selected) {
   const query = new URLSearchParams({ repository });
   const typed = words();
   if (typed) query.set('q', typed);
+  if (current && current.clusters) query.set('cluster', '1');
   if (skill) query.set('skill', skill);
   history[how](null, '', '?' + query);
 }
@@ -383,13 +567,16 @@ function setAddress(how, repository = current.repository, skill = current && cur
 form.addEventListener('submit', (event) => {
   event.preventDefault();
   const repository = field.value.trim();
+  dropClusters();
   setAddress('pushState', repository, null);
   load(repository);
 });
 
-// Filtering is instant, on the scan already done; it never scans again.
+// Filtering is instant, on the scan already done; it never scans again. It drops the clusters: they
+// were of the skills shown before.
 function filtered() {
   if (!current) return;
+  dropClusters();
   render();
   setAddress('replaceState');
 }
@@ -411,9 +598,10 @@ function fromAddress() {
   const query = new URLSearchParams(location.search);
   const repository = query.get('repository');
   filter.value = query.get('q') || '';
-  if (repository) return load(repository, query.get('skill'));
+  if (repository) return load(repository, query.get('skill'), query.get('cluster') === '1');
   // The bare page: nothing scanned. A scan still running is dropped, as a newer one would.
   loading++;
+  dropClusters();
   current = undefined;
   say('');
   warnings.replaceChildren();

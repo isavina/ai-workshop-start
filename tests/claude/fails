@@ -1,0 +1,3 @@
+#!/bin/sh
+# The fake claude -p, answering as fails: tests/claude/fake-claude.ts.
+exec node "$(dirname "$0")/fake-claude.ts" fails

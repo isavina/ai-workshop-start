@@ -3,13 +3,16 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { request as httpRequest } from 'node:http';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { createWebServer, listen } from '../src/web.ts';
-import { atlas, CLI, EXAMPLE_COMMIT, FIXTURE, opener } from './helpers.ts';
+import { claude } from '../src/claude.ts';
+import type { Ask } from '../src/core/cluster.ts';
+import { atlas, CLI, EXAMPLE_COMMIT, FAKE_CLAUDE, FIXTURE, opener } from './helpers.ts';
 
 const server = createWebServer({ open: opener() });
 const address = await listen(server, 0);
@@ -102,14 +105,15 @@ async function pageScript(search: string) {
   const page = await get('/');
   const script = /<script>([\s\S]*?)<\/script>/.exec(page.text)?.[1] ?? '';
   const elements: Record<string, FakeElement> = {};
-  for (const id of ['scan', 'status', 'warnings', 'filter', 'skills', 'skill']) elements[id] = new FakeElement(id);
+  for (const id of ['scan', 'status', 'warnings', 'filter', 'skills', 'skill', 'cluster']) elements[id] = new FakeElement(id);
   elements.filter.value = '';
   const field = new FakeElement('input');
   const button = new FakeElement('button');
   elements.scan.elements = { repository: field };
   elements.scan.append(button);
   const main = new FakeElement('main');
-  const fetches: { url: string; answer: (body: unknown) => Promise<void> }[] = [];
+  type Init = { method?: string; body?: string; signal?: AbortSignal };
+  const fetches: { url: string; init?: Init; answer: (body: unknown, ok?: boolean) => Promise<void> }[] = [];
   const timers = new Map<number, () => void>();
   let timerId = 0;
   const windowListeners: Record<string, () => void> = {};
@@ -133,12 +137,16 @@ async function pageScript(search: string) {
     Date,
     setInterval: (callback: () => void) => (timers.set(++timerId, callback), timerId),
     clearInterval: (id: number) => timers.delete(id),
-    fetch: (url: string) =>
-      new Promise((resolve) => {
+    AbortController,
+    // As a browser's: stopped by its signal, it fails with an AbortError.
+    fetch: (url: string, init?: Init) =>
+      new Promise((resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('The operation was aborted.', 'AbortError')));
         fetches.push({
           url,
-          answer: async (body) => {
-            resolve({ ok: true, json: async () => body });
+          init,
+          answer: async (body, ok = true) => {
+            resolve({ ok, json: async () => body });
             await settle();
           },
         });
@@ -158,6 +166,11 @@ async function pageScript(search: string) {
     click: (name: string) =>
       (elements.skills.querySelectorAll('button').find((button) => button.textContent.startsWith(name))?.onclick as () => void)(),
     button,
+    clusterButton: elements.cluster,
+    cluster: async () => {
+      elements.cluster.listeners.click({});
+      await settle();
+    },
     fetches,
     tick: () => [...timers.values()].forEach((callback) => callback()),
     submit: (repository: string) => {
@@ -442,4 +455,323 @@ test('the page: a new scan keeps the filter, in the address too; it asks for the
   await page.fetches[1].answer({ ...ONE, repository: { id: 'Acme/other', url: 'https://github.com/Acme/other' } });
   assert.equal(page.status.textContent, 'Acme/other · 2 of 3 skills');
   assert.deepEqual(shownNames(page.list), ['code-review', 'release']);
+});
+
+/** A server whose Claude is `cluster`; closed after the test. */
+async function clusterServer(t: { after(callback: () => void): void }, cluster?: Ask) {
+  const server = createWebServer({ open: opener(), cluster });
+  const address = await listen(server, 0);
+  t.after(() => server.close());
+  const post = async (body: unknown, method = 'POST', headers: Record<string, string> = { 'Content-Type': 'application/json' }) => {
+    const response = await fetch(`${address}/api/cluster`, {
+      method,
+      headers,
+      ...(method === 'POST' && { body: typeof body === 'string' ? body : JSON.stringify(body) }),
+    });
+    return { status: response.status, body: await response.json() };
+  };
+  return Object.assign(post, { address });
+}
+
+const FIXTURE_SKILLS = [
+  { id: 'b', name: 'build', description: 'Build the subproject with its own Gradle wrapper.' },
+  { id: 'c', name: 'commits', description: 'Write commit messages.' },
+  { id: 'p', name: 'plain', description: '' },
+  { id: 'r', name: 'release-checklist', description: '' },
+];
+
+test('POST /api/cluster: the clusters, by id, sorted, Other last, as --cluster makes them', async (t) => {
+  const post = await clusterServer(t, claude({ command: FAKE_CLAUDE.topics }));
+  assert.deepEqual(await post({ skills: FIXTURE_SKILLS }), {
+    status: 200,
+    body: {
+      clusters: [
+        { label: 'Build and release', skills: ['b', 'r'] },
+        { label: 'Code and commits', skills: ['c'] },
+        { label: 'Other', skills: ['p'] },
+      ],
+    },
+  });
+});
+
+test('POST /api/cluster: fewer than 2 skills → no clusters, Claude not asked', async (t) => {
+  const asked: string[] = [];
+  const post = await clusterServer(t, async (prompt) => (asked.push(prompt), ''));
+  assert.deepEqual(await post({ skills: FIXTURE_SKILLS.slice(0, 1) }), { status: 200, body: { clusters: [] } });
+  assert.deepEqual(await post({ skills: [] }), { status: 200, body: { clusters: [] } });
+  assert.deepEqual(asked, []);
+});
+
+test('POST /api/cluster: Claude sees only the names and descriptions', async (t) => {
+  const asked: string[] = [];
+  const post = await clusterServer(t, async (prompt) => {
+    asked.push(prompt);
+    return JSON.stringify({ clusters: [{ label: 'A', skills: [1, 2] }, { label: 'B', skills: [3, 4] }] });
+  });
+  const extra = FIXTURE_SKILLS.map((skill) => ({ ...skill, text: 'SECRET TEXT', path: 'x/SKILL.md' }));
+  assert.deepEqual(await post({ skills: extra }), { status: 200, body: { clusters: [{ label: 'A', skills: ['b', 'c'] }, { label: 'B', skills: ['p', 'r'] }] } });
+  assert.match(asked[0], /^1\. build — Build the subproject with its own Gradle wrapper\.$/m);
+  assert.doesNotMatch(asked[0], /SECRET|SKILL\.md|\bb\b.*\bc\b/);
+});
+
+test('POST /api/cluster: an invalid answer, a failing or missing claude -p → the CLI\'s message, status 400', async (t) => {
+  const invalid = await clusterServer(t, async () => JSON.stringify({ clusters: [{ label: 'All', skills: [1, 2, 3, 4] }] }));
+  assert.deepEqual(await invalid({ skills: FIXTURE_SKILLS }), { status: 400, body: { error: 'claude -p gave an invalid clustering: 1 clusters, not 2 to 8' } });
+  const fails = await clusterServer(t, claude({ command: FAKE_CLAUDE.fails }));
+  assert.deepEqual(await fails({ skills: FIXTURE_SKILLS }), { status: 400, body: { error: 'claude -p failed (exit code 1): Not logged in · Please run /login' } });
+  const slow = await clusterServer(t, claude({ command: FAKE_CLAUDE.slow, timeout: 300 }));
+  assert.deepEqual(await slow({ skills: FIXTURE_SKILLS }), { status: 400, body: { error: 'claude -p did not answer in 0.3 s' } });
+  const missing = await clusterServer(t, claude({ command: '/no/such/claude' }));
+  assert.deepEqual(await missing({ skills: FIXTURE_SKILLS }), {
+    status: 400,
+    body: { error: 'Cannot run /no/such/claude: not found; install Claude Code, or set SKILL_ATLAS_CLAUDE to its command' },
+  });
+  const none = await clusterServer(t);
+  assert.deepEqual(await none({ skills: FIXTURE_SKILLS }), { status: 400, body: { error: 'Clustering needs claude -p: start skill-atlas serve from the command line' } });
+});
+
+test('POST /api/cluster: a malformed body → status 400; only POST', async (t) => {
+  const asked: string[] = [];
+  const post = await clusterServer(t, async (prompt) => (asked.push(prompt), ''));
+  const error = { error: 'Send the skills to cluster: { "skills": [{ "id", "name", "description" }] }' };
+  for (const body of ['not json', 'null', '{}', { skills: 'x' }, { skills: [null] }, { skills: [{ id: 1, name: 'a', description: '' }] },
+    { skills: [{ id: 'a', name: 'a' }] }, { skills: [{ id: 'a', name: 'a', description: '' }, { id: 'a', name: 'b', description: '' }] }]) {
+    assert.deepEqual(await post(body), { status: 400, body: error }, JSON.stringify(body));
+  }
+  assert.deepEqual(asked, []);
+  assert.deepEqual(await post(undefined, 'GET'), { status: 405, body: { error: 'Only POST' } });
+  // Too large: a clear message, not a connection reset.
+  assert.deepEqual(await post({ skills: [{ id: 'a', name: 'a', description: 'x'.repeat(11 * 1024 * 1024) }] }), {
+    status: 400,
+    body: { error: 'Too many skills to cluster at once' },
+  });
+  assert.deepEqual(asked, []);
+});
+
+test('POST /api/cluster: only from the page: JSON, from this machine; another site cannot run claude -p', async (t) => {
+  const asked: string[] = [];
+  const post = await clusterServer(t, async (prompt) => (asked.push(prompt), ''));
+  const skills = { skills: FIXTURE_SKILLS };
+  // A form or a text/plain fetch from another site needs no preflight: refused.
+  assert.deepEqual(await post(skills, 'POST', { 'Content-Type': 'text/plain' }), { status: 415, body: { error: 'Send JSON: Content-Type: application/json' } });
+  assert.deepEqual(await post(skills, 'POST', { 'Content-Type': 'application/json', Origin: 'https://evil.example' }), {
+    status: 403,
+    body: { error: 'Only from the Skill Atlas page' },
+  });
+  // Another server on this machine, another port: not this page.
+  const port = Number(new URL(post.address).port);
+  for (const origin of ['http://localhost:3000', `http://127.0.0.1:${port + 1}`, `https://localhost:${port}`]) {
+    assert.deepEqual(await post(skills, 'POST', { 'Content-Type': 'application/json', Origin: origin }), {
+      status: 403,
+      body: { error: 'Only from the Skill Atlas page' },
+    }, origin);
+  }
+  assert.deepEqual(asked, []);
+  // A domain rebound to 127.0.0.1: its own origin, but not this machine's name.
+  const rebound = await new Promise<number | undefined>((resolve, reject) => {
+    const request = httpRequest({ host: '127.0.0.1', port, path: '/api/cluster', method: 'POST', headers: { Host: `evil.example:${port}`, 'Content-Type': 'application/json' } }, (response) => {
+      response.resume();
+      resolve(response.statusCode);
+    });
+    request.on('error', reject);
+    request.end(JSON.stringify(skills));
+  });
+  assert.equal(rebound, 403);
+  assert.deepEqual(asked, []);
+  // The page's own requests, from its address: accepted.
+  assert.equal((await post(skills, 'POST', { 'Content-Type': 'application/json', Origin: post.address })).status, 400);
+  assert.equal(asked.length, 1);
+});
+
+test('POST /api/cluster: the page gone → claude -p is stopped', async (t) => {
+  let signal: AbortSignal | undefined;
+  const server = createWebServer({
+    open: opener(),
+    cluster: (_, given) => {
+      signal = given;
+      return new Promise((_, reject) => given?.addEventListener('abort', () => reject(new Error('stopped'))));
+    },
+  });
+  const own = await listen(server, 0);
+  t.after(() => server.close());
+  const stop = new AbortController();
+  const request = fetch(`${own}/api/cluster`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ skills: FIXTURE_SKILLS }),
+    signal: stop.signal,
+  }).catch(() => 'aborted');
+  while (!signal) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(signal.aborted, false);
+  stop.abort();
+  assert.equal(await request, 'aborted');
+  while (!signal.aborted) await new Promise((resolve) => setTimeout(resolve, 10));
+});
+
+const ACME_CLUSTERS = { clusters: [{ label: 'Code', skills: ['.claude/skills/code-review/SKILL.md', '.claude/skills/commits/SKILL.md'] }, { label: 'Other', skills: ['.claude/skills/release/SKILL.md'] }] };
+const listed = (list: FakeElement) =>
+  list.children.map((item) => {
+    const element = item as FakeElement;
+    return element.className === 'cluster' || element.className === 'repository' ? `[${element.textContent}]` : element.querySelectorAll('span')[0].textContent;
+  });
+
+test('the page: Cluster groups the scan already shown, by claude -p on the server; K clusters; the address keeps &cluster=1', async () => {
+  const page = await pageScript('?repository=Acme%2Ftools');
+  await page.fetches[0].answer(ONE);
+  assert.equal(page.clusterButton.disabled, false);
+  assert.equal(page.clusterButton.attributes['aria-pressed'], 'false');
+
+  await page.cluster();
+  assert.equal(page.fetches.length, 2, 'it never scans again');
+  assert.equal(page.fetches[1].url, '/api/cluster');
+  assert.equal(page.fetches[1].init?.method, 'POST');
+  assert.deepEqual(JSON.parse(page.fetches[1].init?.body ?? ''), {
+    skills: ONE.skills.map(({ path, name, description }) => ({ id: path, name, description })),
+  });
+  assert.equal(page.clusterButton.disabled, true, 'it waits');
+  assert.equal(page.clusterButton.textContent, 'Clustering…');
+
+  await page.fetches[1].answer(ACME_CLUSTERS);
+  assert.equal(page.status.textContent, 'Acme/tools · 3 skills · 2 clusters');
+  assert.deepEqual(listed(page.list), ['[Code2 skills]', 'code-review', 'commits', '[Other1 skill]', 'release']);
+  assert.equal(page.clusterButton.attributes['aria-pressed'], 'true');
+  assert.equal(page.clusterButton.textContent, 'Cluster');
+  assert.equal(page.clusterButton.disabled, false);
+  assert.equal(page.address(), '?repository=Acme%2Ftools&cluster=1&skill=.claude%2Fskills%2Fcode-review%2FSKILL.md');
+  page.click('release');
+  assert.equal(page.address(), '?repository=Acme%2Ftools&cluster=1&skill=.claude%2Fskills%2Frelease%2FSKILL.md');
+
+  // Pressed again: the plain list.
+  await page.cluster();
+  assert.equal(page.fetches.length, 2);
+  assert.equal(page.status.textContent, 'Acme/tools · 3 skills');
+  assert.deepEqual(listed(page.list), ['code-review', 'commits', 'release']);
+  assert.equal(page.clusterButton.attributes['aria-pressed'], 'false');
+  assert.equal(page.address(), '?repository=Acme%2Ftools&skill=.claude%2Fskills%2Frelease%2FSKILL.md');
+});
+
+test('the page: only the filtered skills are clustered; changing the filter drops the clusters, and an answer still coming', async () => {
+  const page = await pageScript('?repository=Acme%2Ftools&q=rev');
+  await page.fetches[0].answer(ONE);
+  await page.cluster();
+  assert.deepEqual(JSON.parse(page.fetches[1].init?.body ?? '').skills.map((skill: { name: string }) => skill.name), ['code-review', 'release']);
+  await page.fetches[1].answer({ clusters: [{ label: 'Release', skills: ['.claude/skills/release/SKILL.md'] }, { label: 'Review', skills: ['.claude/skills/code-review/SKILL.md'] }] });
+  assert.equal(page.status.textContent, 'Acme/tools · 2 of 3 skills · 2 clusters');
+  assert.deepEqual(listed(page.list), ['[Release1 skill]', 'release', '[Review1 skill]', 'code-review']);
+
+  page.filter('re');
+  assert.equal(page.status.textContent, 'Acme/tools · 2 of 3 skills');
+  assert.deepEqual(listed(page.list), ['code-review', 'release']);
+  assert.equal(page.address(), '?repository=Acme%2Ftools&q=re&skill=.claude%2Fskills%2Fcode-review%2FSKILL.md');
+
+  // A filter change while it clusters: the answer is dropped.
+  await page.cluster();
+  page.filter('');
+  assert.equal(page.clusterButton.disabled, false);
+  await page.fetches[2].answer(ACME_CLUSTERS);
+  assert.equal(page.status.textContent, 'Acme/tools · 3 skills');
+  assert.deepEqual(listed(page.list), ['code-review', 'commits', 'release']);
+});
+
+test('the page: an answer dropped → its request is stopped, so the server stops claude -p; the error is not shown', async () => {
+  const page = await pageScript('?repository=Acme%2Ftools');
+  await page.fetches[0].answer(ONE);
+  assert.equal(page.fetches[0].init?.signal, undefined, 'a scan is not a cluster request');
+  const dropped = async (drop: () => void | Promise<void>) => {
+    await page.cluster();
+    const request = page.fetches.at(-1);
+    assert.equal(request?.url, '/api/cluster');
+    assert.equal(request?.init?.signal?.aborted, false);
+    await drop();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(request?.init?.signal?.aborted, true);
+    assert.notEqual(page.status.className, 'error');
+    assert.doesNotMatch(page.status.textContent, /Cannot reach|abort/i);
+  };
+  await dropped(() => page.filter('re'));
+  page.filter('');
+  // Pressed again while it clusters: the plain list.
+  await dropped(() => page.cluster());
+  // A new scan.
+  await dropped(() => page.submit('Acme/tools'));
+  await page.fetches.at(-1)?.answer(ONE);
+  // An answer that came is not stopped afterwards.
+  await page.cluster();
+  const answered = page.fetches.at(-1);
+  await answered?.answer(ACME_CLUSTERS);
+  page.filter('re');
+  assert.equal(answered?.init?.signal?.aborted, false);
+});
+
+test('the page: a new scan drops an answer still coming; fewer than 2 skills shown → Cluster disabled', async () => {
+  const page = await pageScript('?repository=Acme%2Ftools');
+  await page.fetches[0].answer(ONE);
+  await page.cluster();
+  page.submit('Acme/other');
+  assert.equal(page.address(), '?repository=Acme%2Fother');
+  await page.fetches[1].answer(ACME_CLUSTERS);
+  await page.fetches[2].answer(ONE);
+  assert.equal(page.status.textContent, 'Acme/tools · 3 skills');
+  assert.equal(page.clusterButton.attributes['aria-pressed'], 'false');
+
+  page.filter('commit');
+  assert.equal(page.clusterButton.disabled, true);
+  await page.cluster();
+  assert.equal(page.fetches.length, 3, 'nothing to cluster');
+  page.filter('deploy');
+  assert.equal(page.clusterButton.disabled, true);
+});
+
+test('the page: &cluster=1 reloaded with fewer than 2 matches → the plain list; the address drops it', async () => {
+  const page = await pageScript('?repository=Acme%2Ftools&q=commit&cluster=1');
+  await page.fetches[0].answer(ONE);
+  assert.equal(page.fetches.length, 1, 'nothing to cluster');
+  assert.equal(page.status.textContent, 'Acme/tools · 1 of 3 skills');
+  assert.equal(page.address(), '?repository=Acme%2Ftools&q=commit&skill=.claude%2Fskills%2Fcommits%2FSKILL.md');
+});
+
+test('the page: an error → its message, in the error colour; the plain list stays', async () => {
+  const page = await pageScript('?repository=Acme%2Ftools');
+  await page.fetches[0].answer(ONE);
+  await page.cluster();
+  await page.fetches[1].answer({ error: 'claude -p failed (exit code 1): Invalid API key' }, false);
+  assert.equal(page.status.textContent, 'claude -p failed (exit code 1): Invalid API key');
+  assert.equal(page.status.className, 'error');
+  assert.deepEqual(listed(page.list), ['code-review', 'commits', 'release']);
+  assert.equal(page.clusterButton.disabled, false);
+  assert.equal(page.clusterButton.attributes['aria-pressed'], 'false');
+  assert.doesNotMatch(page.address() ?? '', /cluster/);
+});
+
+test('the page: a clustered address, reloaded: scanned, filtered, then clustered; an organization, each skill with its repository', async () => {
+  const organization = {
+    owner: { name: 'Acme', url: 'https://github.com/Acme' },
+    scanned: 3,
+    repositories: [
+      { repository: { id: 'Acme/tools', url: 'https://github.com/Acme/tools' }, skills: ONE.skills },
+      { repository: { id: 'Acme/web', url: 'https://github.com/Acme/web' }, skills: [skillOf('Acme/web', 'deploy', 'Deploy the site; review it.'), skillOf('Acme/web', 'code-review', 'Review the site.')] },
+    ],
+    warnings: [],
+  };
+  const page = await pageScript('?repository=github.com%2FAcme&q=review&cluster=1');
+  await page.fetches[0].answer(organization);
+  assert.equal(page.fetches[1].url, '/api/cluster');
+  const ids = JSON.parse(page.fetches[1].init?.body ?? '').skills.map((skill: { id: string }) => skill.id);
+  assert.deepEqual(ids, [
+    'Acme/tools:.claude/skills/code-review/SKILL.md',
+    'Acme/tools:.claude/skills/release/SKILL.md',
+    'Acme/web:.claude/skills/deploy/SKILL.md',
+    'Acme/web:.claude/skills/code-review/SKILL.md',
+  ]);
+  await page.fetches[1].answer({ clusters: [{ label: 'Review', skills: [ids[3], ids[0]] }, { label: 'Ship', skills: [ids[2], ids[1]] }] });
+  assert.equal(page.status.textContent, 'Acme · 4 of 5 skills in 2 repositories · 2 clusters');
+  assert.deepEqual(listed(page.list), ['[Review2 skills]', 'code-review', 'code-review', '[Ship2 skills]', 'deploy', 'release']);
+  const paths = page.list.querySelectorAll('span').filter((span) => span.className === 'path').map((span) => span.textContent);
+  assert.deepEqual(paths, [
+    'Acme/tools · .claude/skills/code-review/SKILL.md',
+    'Acme/web · .claude/skills/code-review/SKILL.md',
+    'Acme/web · .claude/skills/deploy/SKILL.md',
+    'Acme/tools · .claude/skills/release/SKILL.md',
+  ]);
+  assert.equal(page.address(), '?repository=github.com%2FAcme&q=review&cluster=1&skill=Acme%2Ftools%3A.claude%2Fskills%2Fcode-review%2FSKILL.md');
 });
